@@ -27,7 +27,9 @@ cp .env.example .env
 
 ### `POST /predict`
 
-17개 Statcast 피처를 받아 예측 구종, 신뢰도, 구종별 확률, 자연어 설명을 반환합니다.
+17개 Statcast 피처와 투구 손(`p_throws`, 생략 시 `"R"`)을 받아 예측 구종, 신뢰도,
+구종별 확률, 자연어 설명을 반환합니다. `p_throws`는 예측 자체에는 쓰이지 않고,
+자연어 설명에서 좌우 움직임을 올바르게 해석하는 데만 사용됩니다.
 
 요청 바디 예시:
 
@@ -38,7 +40,7 @@ cp .env.example .env
   "release_pos_z": 6.1, "pfx_x": 0.8, "pfx_z": 1.2,
   "plate_x": 0.3, "plate_z": 2.8, "vx0": 5.2,
   "vy0": -138.0, "vz0": -5.1, "ax": 8.3, "ay": 28.5,
-  "az": -14.2, "effective_speed": 93.1, "spin_axis": 210.0
+  "az": -14.2, "effective_speed": 93.1, "spin_axis": 210.0, "p_throws": "R"
 }
 ```
 
