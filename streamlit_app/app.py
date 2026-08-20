@@ -1,7 +1,7 @@
 """app.py - MLB Pitch Classifier 웹 데모 (Streamlit)"""
 
 import re
-from datetime import date, timedelta
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -249,16 +249,41 @@ def search_pitchers(query):
         debut = p.get("mlbDebutDate")
         if not debut:
             continue  # MLB 출전 기록이 없으면 Statcast 데이터도 없다
+        last_played = p.get("lastPlayedDate")
         candidates.append({
             "id": p["id"],
             "name": p["fullName"],
             "team": p.get("currentTeam", {}).get("name", "소속팀 미상"),
             "debut_year": debut[:4],
+            "last_year": last_played[:4] if last_played else None,
             "active": p.get("active", False),
+            "throws": p.get("pitchHand", {}).get("code", "R"),
         })
 
     candidates.sort(key=lambda c: (not c["active"], -int(c["debut_year"])))
     return candidates[:15]
+
+
+STATCAST_START_YEAR = 2015
+
+
+def career_label(c):
+    """'이름 (팀, 데뷔~현재)' 또는 은퇴 선수는 '이름 (데뷔~은퇴, 은퇴)' 형식으로 표기한다."""
+    if c["active"]:
+        return f"{c['name']} ({c['team']}, {c['debut_year']}~현재)"
+    end = c["last_year"] or c["debut_year"]
+    return f"{c['name']} ({c['debut_year']}~{end}, 은퇴)"
+
+
+def available_seasons(c):
+    """Statcast가 제공되는 2015년 이후 범위로 제한한 이 투수의 조회 가능 시즌 목록(최신순)."""
+    this_year = date.today().year
+    start = max(int(c["debut_year"]), STATCAST_START_YEAR)
+    end = this_year if c["active"] else int(c["last_year"] or c["debut_year"])
+    end = min(end, this_year)
+    if start > end:
+        return []
+    return list(range(end, start - 1, -1))
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -308,9 +333,6 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    p_throws = st.radio("투구 손", ["우완 (R)", "좌완 (L)"], horizontal=True)
-    st.session_state.p_throws = 'L' if 'L' in p_throws else 'R'
-
     st.markdown("---")
 
     if mode == "슬라이더로 직접 조절":
@@ -358,6 +380,10 @@ with st.sidebar:
             st.info("CSV 파일을 업로드하면 실제 투구 데이터에서 선택할 수 있습니다.")
 
     else:
+        st.caption(
+            f"Statcast 데이터는 {STATCAST_START_YEAR}년부터 제공됩니다. "
+            f"{STATCAST_START_YEAR}년 이전 활동 선수는 그 이후 시즌 기록만 조회할 수 있어요."
+        )
         query = st.text_input("투수 이름 (2글자 이상, 영어)", placeholder="Gerrit Cole")
         query = query.strip()
 
@@ -374,25 +400,38 @@ with st.sidebar:
             if candidates is not None and not candidates:
                 st.error("선수를 찾을 수 없습니다.")
             elif candidates:
-                options = {
-                    f"{c['name']} ({c['team']}, {c['debut_year']}~)": c for c in candidates
-                }
+                options = {career_label(c): c for c in candidates}
                 choice = st.selectbox("검색 결과", options=list(options.keys()))
                 chosen = options[choice]
+                st.session_state.p_throws = chosen['throws']
 
-                days = st.slider("최근 며칠간 데이터에서 찾기", 7, 90, 30)
-                end = date.today()
-                start = end - timedelta(days=days)
-                with st.spinner(f"{chosen['name']} 선수의 최근 투구 데이터를 가져오는 중..."):
-                    df = fetch_pitcher_statcast(chosen['id'], start.isoformat(), end.isoformat())
-
-                if df.empty:
-                    st.warning("해당 기간에 투구 데이터가 없습니다. 기간을 늘려보세요.")
+                seasons = available_seasons(chosen)
+                if not seasons:
+                    st.warning(
+                        f"{chosen['name']} 선수는 Statcast 데이터 제공({STATCAST_START_YEAR}년) "
+                        "이전에 활동을 마쳐 투구 데이터를 조회할 수 없습니다."
+                    )
                 else:
-                    render_pitch_mix(df)
-                    select_and_predict_from_df(df)
+                    season = st.selectbox("시즌 선택", options=seasons)
+                    with st.spinner(f"{chosen['name']} 선수의 {season}시즌 투구 데이터를 가져오는 중..."):
+                        df = fetch_pitcher_statcast(chosen['id'], f"{season}-01-01", f"{season}-12-31")
+
+                    if df.empty:
+                        st.warning(f"{season}시즌 투구 기록이 없습니다.")
+                    else:
+                        render_pitch_mix(df)
+                        select_and_predict_from_df(df)
         elif query:
             st.caption("2글자 이상 입력하면 검색됩니다.")
+
+    st.markdown("---")
+    p_throws_choice = st.radio(
+        "투구 손", options=['R', 'L'],
+        format_func=lambda v: '우완 (R)' if v == 'R' else '좌완 (L)',
+        horizontal=True, key='p_throws',
+        disabled=(mode != "슬라이더로 직접 조절"),
+        help=None if mode == "슬라이더로 직접 조절" else "실제 투구 데이터에서 자동으로 반영됩니다.",
+    )
 
     st.markdown("---")
     with st.expander("구종별 만들기 가이드"):
