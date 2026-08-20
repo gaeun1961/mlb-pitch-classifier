@@ -1,5 +1,7 @@
 """app.py - MLB Pitch Classifier 웹 데모 (Streamlit)"""
 
+from datetime import date, timedelta
+
 import numpy as np
 import pandas as pd
 import requests
@@ -170,23 +172,86 @@ if 'label' not in st.session_state:
     st.session_state.conf = None
     st.session_state.proba = None
     st.session_state.explanation = None
+if 'warmed_up' not in st.session_state:
+    st.session_state.warmed_up = False
 
 
 def run_prediction(inp):
     """백엔드 예측을 호출하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다."""
+    spinner_msg = (
+        "예측 중입니다..." if st.session_state.warmed_up
+        else "예측 중입니다... (첫 요청은 서버 웜업으로 최대 50초 정도 걸릴 수 있어요)"
+    )
     try:
-        label, conf, proba, explanation = predict(inp)
+        with st.spinner(spinner_msg):
+            label, conf, proba, explanation = predict(inp)
         st.session_state.label = label
         st.session_state.conf = conf
         st.session_state.proba = proba
         st.session_state.explanation = explanation
+        st.session_state.warmed_up = True
     except requests.exceptions.RequestException as e:
         st.error(f"예측 서버에 연결할 수 없습니다: {e}")
+
+
+def select_and_predict_from_df(df):
+    """DataFrame에서 결측치 없는 행만 골라 선택 UI를 보여주고, 선택된 투구로 예측을 실행한다."""
+    missing = [c for c in FEATURE_COLS if c not in df.columns]
+    if missing:
+        st.error(f"필요한 컬럼이 없습니다: {missing}")
+        return
+
+    df_valid = df.dropna(subset=FEATURE_COLS).reset_index(drop=True)
+    if df_valid.empty:
+        st.warning("선택 가능한 투구가 없습니다.")
+        return
+
+    st.success(f"{len(df_valid):,}개 투구 로드 완료")
+    show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
+                              'release_spin_rate', 'game_date'] if c in df_valid.columns]
+    idx = st.selectbox(
+        "투구 선택",
+        options=df_valid.index,
+        format_func=lambda i: " | ".join(str(df_valid.loc[i, c]) for c in show_cols)
+    )
+    row = df_valid.loc[idx]
+    inp = {col: float(row[col]) for col in FEATURE_COLS}
+    st.session_state.inp = inp
+    if 'p_throws' in df_valid.columns:
+        st.session_state.p_throws = str(row.get('p_throws', 'R'))
+    run_prediction(inp)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def lookup_pitcher_id(last, first):
+    """이름으로 MLBAM 선수 ID를 조회한다. 동명이인이 있으면 가장 최근까지 활동한 선수를 선택한다."""
+    from pybaseball import playerid_lookup
+
+    result = playerid_lookup(last, first)
+    result = result.dropna(subset=['key_mlbam'])
+    if result.empty:
+        return None
+    result = result.sort_values('mlb_played_last', ascending=False)
+    return int(result.iloc[0]['key_mlbam'])
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_pitcher_statcast(player_id, start_dt, end_dt):
+    """해당 투수의 기간 내 Statcast 투구 데이터를 가져온다."""
+    from pybaseball import statcast_pitcher
+
+    return statcast_pitcher(start_dt, end_dt, player_id)
+
 
 # ── 사이드바: 입력 컨트롤 ────────────────────────────────
 with st.sidebar:
     st.markdown("### 투구 만들기")
-    mode = st.radio("입력 방식", ["슬라이더로 직접 조절", "CSV에서 실제 투구 선택"], label_visibility="collapsed")
+    st.caption("⏱️ 첫 예측은 백엔드 서버 웜업으로 최대 50초 정도 걸릴 수 있어요.")
+    mode = st.radio(
+        "입력 방식",
+        ["슬라이더로 직접 조절", "CSV에서 실제 투구 선택", "투수 이름으로 검색"],
+        label_visibility="collapsed",
+    )
 
     p_throws = st.radio("투구 손", ["우완 (R)", "좌완 (L)"], horizontal=True)
     st.session_state.p_throws = 'L' if 'L' in p_throws else 'R'
@@ -229,31 +294,48 @@ with st.sidebar:
         st.session_state.inp = inp
         run_prediction(inp)
 
-    else:
+    elif mode == "CSV에서 실제 투구 선택":
         uploaded = st.file_uploader("Statcast CSV 업로드", type=["csv"])
         if uploaded is not None:
             df = pd.read_csv(uploaded, low_memory=False)
-            missing = [c for c in FEATURE_COLS if c not in df.columns]
-            if missing:
-                st.error(f"필요한 컬럼이 없습니다: {missing}")
-            else:
-                df_valid = df.dropna(subset=FEATURE_COLS).reset_index(drop=True)
-                st.success(f"{len(df_valid):,}개 투구 로드 완료")
-                show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
-                                          'release_spin_rate', 'game_date'] if c in df_valid.columns]
-                idx = st.selectbox(
-                    "투구 선택",
-                    options=df_valid.index,
-                    format_func=lambda i: " | ".join(str(df_valid.loc[i, c]) for c in show_cols)
-                )
-                row = df_valid.loc[idx]
-                inp = {col: float(row[col]) for col in FEATURE_COLS}
-                st.session_state.inp = inp
-                if 'p_throws' in df_valid.columns:
-                    st.session_state.p_throws = str(row.get('p_throws', 'R'))
-                run_prediction(inp)
+            select_and_predict_from_df(df)
         else:
             st.info("CSV 파일을 업로드하면 실제 투구 데이터에서 선택할 수 있습니다.")
+
+    else:
+        name_input = st.text_input("투수 이름 (예: Gerrit Cole)", placeholder="Gerrit Cole")
+        days = st.slider("최근 며칠간 데이터에서 찾기", 7, 90, 30)
+        search = st.button("검색", use_container_width=True)
+
+        if search:
+            parts = name_input.strip().split()
+            if len(parts) < 2:
+                st.error("이름과 성을 함께 입력해주세요 (예: Gerrit Cole).")
+                st.session_state.search_df = None
+            else:
+                first, last = parts[0], parts[-1]
+                with st.spinner(f"'{name_input}' 선수 정보를 찾는 중..."):
+                    pid = lookup_pitcher_id(last, first)
+
+                if pid is None:
+                    st.error(f"'{name_input}' 선수를 찾을 수 없습니다.")
+                    st.session_state.search_df = None
+                else:
+                    end = date.today()
+                    start = end - timedelta(days=days)
+                    with st.spinner(f"최근 {days}일간 투구 데이터를 가져오는 중..."):
+                        st.session_state.search_df = fetch_pitcher_statcast(
+                            pid, start.isoformat(), end.isoformat()
+                        )
+
+        # 검색 결과는 세션 상태에 저장해, 아래 selectbox 조작으로 스크립트가
+        # 다시 실행되어도(버튼 상태는 초기화되어도) 결과가 유지되도록 한다.
+        search_df = st.session_state.get('search_df')
+        if search_df is not None:
+            if search_df.empty:
+                st.warning("해당 기간에 투구 데이터가 없습니다. 기간을 늘려보세요.")
+            else:
+                select_and_predict_from_df(search_df)
 
     st.markdown("---")
     with st.expander("구종별 만들기 가이드"):
