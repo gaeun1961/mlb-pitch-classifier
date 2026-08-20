@@ -6,7 +6,7 @@ MLB Statcast 투구 데이터를 기반으로 MLP 신경망이 7가지 구종(�
 
 ## 🌐 웹 데모
 
-**[Live Demo →](https://share.streamlit.io)** *(배포 후 실제 링크로 교체)*
+**[Live Demo →](https://mlb-pitch-classifier-tgtrdgldkletpsw43j26sz.streamlit.app/)**
 
 설치 없이 브라우저에서 바로 슬라이더로 가상의 투구를 만들거나, 실제 Statcast 데이터를 업로드해 모델의 예측을 확인할 수 있습니다.
 
