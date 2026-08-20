@@ -39,6 +39,7 @@ class PitchFeatures(BaseModel):
     az: float
     effective_speed: float
     spin_axis: float
+    p_throws: str = 'R'
 
 
 class PredictionResponse(BaseModel):
@@ -56,8 +57,9 @@ def health():
 @app.post("/predict", response_model=PredictionResponse)
 def predict_pitch(features: PitchFeatures):
     input_dict = features.model_dump()
+    p_throws = input_dict.pop('p_throws')
     label, confidence, proba = predict(input_dict)
-    explanation = generate_explanation(input_dict, label, confidence, proba)
+    explanation = generate_explanation(input_dict, label, confidence, proba, p_throws)
     return PredictionResponse(
         predicted_label=label,
         confidence=confidence,

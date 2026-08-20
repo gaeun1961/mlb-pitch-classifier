@@ -185,7 +185,7 @@ def run_prediction(inp):
     )
     try:
         with st.spinner(spinner_msg):
-            label, conf, proba, explanation = predict(inp)
+            label, conf, proba, explanation = predict(inp, st.session_state.p_throws)
         st.session_state.label = label
         st.session_state.conf = conf
         st.session_state.proba = proba

@@ -39,9 +39,10 @@ SAMPLE_VALUES = {
 }
 
 
-def predict(input_dict):
+def predict(input_dict, p_throws='R'):
     """FastAPI 백엔드에 예측을 요청해 (예측 구종, 신뢰도, 확률 딕셔너리, 설명)을 반환한다."""
-    resp = requests.post(f"{BACKEND_URL}/predict", json=input_dict, timeout=10)
+    payload = dict(input_dict, p_throws=p_throws)
+    resp = requests.post(f"{BACKEND_URL}/predict", json=payload, timeout=10)
     resp.raise_for_status()
     data = resp.json()
     return data['predicted_label'], data['confidence'], data['probabilities'], data['explanation']

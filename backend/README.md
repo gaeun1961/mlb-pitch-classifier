@@ -27,7 +27,9 @@ cp .env.example .env
 
 ### `POST /predict`
 
-17개 Statcast 피처를 받아 예측 구종, 신뢰도, 구종별 확률, 자연어 설명을 반환합니다.
+17개 Statcast 피처와 투구 손(`p_throws`, 생략 시 `"R"`)을 받아 예측 구종, 신뢰도,
+구종별 확률, 자연어 설명을 반환합니다. `p_throws`는 예측 자체에는 쓰이지 않고,
+자연어 설명에서 좌우 움직임을 올바르게 해석하는 데만 사용됩니다.
 
 요청 바디 예시:
 
@@ -38,7 +40,7 @@ cp .env.example .env
   "release_pos_z": 6.1, "pfx_x": 0.8, "pfx_z": 1.2,
   "plate_x": 0.3, "plate_z": 2.8, "vx0": 5.2,
   "vy0": -138.0, "vz0": -5.1, "ax": 8.3, "ay": 28.5,
-  "az": -14.2, "effective_speed": 93.1, "spin_axis": 210.0
+  "az": -14.2, "effective_speed": 93.1, "spin_axis": 210.0, "p_throws": "R"
 }
 ```
 
@@ -59,9 +61,10 @@ cp .env.example .env
 
 ## 자연어 설명 (Gemini API)
 
-`explain.py`는 예측 구종, 신뢰도, 2순위 구종, 핵심 피처(구속/az/ax/회전수)로
-프롬프트를 구성해 `gemini-3.6-flash`를 호출하고 2~3문장짜리 한국어 설명을 받습니다.
-(`gemini-2.0-flash`는 서비스 종료되어 API가 이 모델로 마이그레이션을 안내합니다.)
+`explain.py`는 예측 구종, 신뢰도, 2순위 구종, 핵심 피처(구속/az/ax/pfx/회전수/투구 손)로
+프롬프트를 구성해 `gemini-2.5-flash-lite`를 호출하고 2~3문장짜리 한국어 설명을 받습니다.
+(`gemini-2.0-flash`는 서비스 종료되었고, `gemini-3.6-flash`는 무료 티어가 하루 20회로
+제한돼 있어 `-lite` 계열로 사용합니다.)
 
 - API 키는 [Google AI Studio](https://aistudio.google.com)에서 발급받습니다.
 - 키는 절대 코드나 저장소에 커밋하지 않고 `GEMINI_API_KEY` 환경변수로만 전달합니다.
