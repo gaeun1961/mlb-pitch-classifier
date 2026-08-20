@@ -11,6 +11,18 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
+`GEMINI_API_KEY`를 설정하면 자연어 설명을 Gemini API로 생성합니다. 설정하지
+않으면(또는 API 호출이 실패하면) 규칙 기반 설명으로 자동 폴백합니다.
+
+로컬 개발 시 `backend/.env.example`을 복사해 `backend/.env`를 만들고 키를 채워주세요
+(`.env`는 `.gitignore`에 포함되어 있어 커밋되지 않습니다). `main.py`가 시작 시
+`.env`를 자동으로 읽습니다.
+
+```bash
+cp .env.example .env
+# .env를 열어 GEMINI_API_KEY=발급받은키 로 채우기
+```
+
 ## API
 
 ### `POST /predict`
@@ -45,6 +57,17 @@ uvicorn main:app --reload --port 8000
 
 헬스체크용 엔드포인트.
 
+## 자연어 설명 (Gemini API)
+
+`explain.py`는 예측 구종, 신뢰도, 2순위 구종, 핵심 피처(구속/az/ax/회전수)로
+프롬프트를 구성해 `gemini-3.6-flash`를 호출하고 2~3문장짜리 한국어 설명을 받습니다.
+(`gemini-2.0-flash`는 서비스 종료되어 API가 이 모델로 마이그레이션을 안내합니다.)
+
+- API 키는 [Google AI Studio](https://aistudio.google.com)에서 발급받습니다.
+- 키는 절대 코드나 저장소에 커밋하지 않고 `GEMINI_API_KEY` 환경변수로만 전달합니다.
+- 키가 없거나 Gemini 호출이 실패/타임아웃(10초)되면 기존 규칙 기반 설명으로 자동
+  폴백하므로 `/predict`는 Gemini 장애와 무관하게 항상 응답합니다.
+
 ## 배포 (Render)
 
 리포지토리 루트의 `render.yaml`이 Render Blueprint 설정을 정의합니다
@@ -61,6 +84,10 @@ uvicorn main:app --reload --port 8000
 > Render Blueprint 대신 수동으로 만들 경우: New Web Service → 이 저장소 선택 →
 > Root Directory `backend` → Build Command `pip install -r requirements.txt` →
 > Start Command `uvicorn main:app --host 0.0.0.0 --port $PORT` → Instance Type Free.
+
+`render.yaml`에 `GEMINI_API_KEY`가 `sync: false`로 선언되어 있어 Blueprint 적용 시
+값 입력을 요구합니다. Blueprint 생성 시 바로 입력하거나, 이후 Render 대시보드의
+서비스 → **Environment** 탭에서 `GEMINI_API_KEY`를 추가/수정할 수 있습니다.
 
 무료 플랜은 일정 시간 트래픽이 없으면 슬립 상태로 전환되며, 다음 요청 시
 콜드 스타트로 응답이 수십 초 지연될 수 있습니다. TensorFlow 모델 로딩 자체도
