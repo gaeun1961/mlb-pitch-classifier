@@ -1,5 +1,6 @@
 """app.py - MLB Pitch Classifier 웹 데모 (Streamlit)"""
 
+import re
 from datetime import date, timedelta
 
 import numpy as np
@@ -222,17 +223,42 @@ def select_and_predict_from_df(df):
     run_prediction(inp)
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def lookup_pitcher_id(last, first):
-    """이름으로 MLBAM 선수 ID를 조회한다. 동명이인이 있으면 가장 최근까지 활동한 선수를 선택한다."""
-    from pybaseball import playerid_lookup
+def contains_korean(text):
+    return bool(re.search(r'[가-힣]', text))
 
-    result = playerid_lookup(last, first)
-    result = result.dropna(subset=['key_mlbam'])
-    if result.empty:
-        return None
-    result = result.sort_values('mlb_played_last', ascending=False)
-    return int(result.iloc[0]['key_mlbam'])
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def search_pitchers(query):
+    """MLB 공식 Stats API로 이름을 검색해 투수만 필터링한 후보 목록을 반환한다.
+
+    pybaseball의 playerid_lookup()은 포지션 정보가 없고 성(last name) 기준 검색만
+    지원해 자동완성에 부적합하다. MLB Stats API는 이름 부분 일치 검색과 포지션·소속팀·
+    데뷔년도를 함께 제공해 이 용도에 더 적합하다.
+    """
+    resp = requests.get(
+        "https://statsapi.mlb.com/api/v1/people/search",
+        params={"names": query, "hydrate": "currentTeam"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    candidates = []
+    for p in resp.json().get("people", []):
+        if p.get("primaryPosition", {}).get("abbreviation") != "P":
+            continue
+        debut = p.get("mlbDebutDate")
+        if not debut:
+            continue  # MLB 출전 기록이 없으면 Statcast 데이터도 없다
+        candidates.append({
+            "id": p["id"],
+            "name": p["fullName"],
+            "team": p.get("currentTeam", {}).get("name", "소속팀 미상"),
+            "debut_year": debut[:4],
+            "active": p.get("active", False),
+        })
+
+    candidates.sort(key=lambda c: (not c["active"], -int(c["debut_year"])))
+    return candidates[:15]
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -241,6 +267,35 @@ def fetch_pitcher_statcast(player_id, start_dt, end_dt):
     from pybaseball import statcast_pitcher
 
     return statcast_pitcher(start_dt, end_dt, player_id)
+
+
+def render_pitch_mix(df):
+    """최근 투구의 구종별 사용 비율을 가로 막대 차트로 보여준다."""
+    if 'pitch_type' not in df.columns:
+        return
+    counts = df['pitch_type'].dropna()
+    counts = counts[counts.isin(PITCH_NAMES.keys())]
+    if counts.empty:
+        return
+
+    ratio = (counts.value_counts(normalize=True) * 100).sort_values()
+    fig = go.Figure(go.Bar(
+        x=ratio.values, y=[PITCH_NAMES.get(k, k) for k in ratio.index], orientation='h',
+        marker_color=[PITCH_COLORS.get(k, '#9CACC0') for k in ratio.index],
+        text=[f'{v:.0f}%' for v in ratio.values],
+        textposition='outside',
+    ))
+    fig.update_layout(
+        height=max(120, 40 * len(ratio)), margin=dict(l=10, r=30, t=10, b=30),
+        plot_bgcolor="#142840", paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color="#9CACC0", size=11),
+        xaxis=dict(title='%', range=[0, max(ratio.values) * 1.25],
+                   gridcolor="rgba(255,255,255,0.07)", zeroline=False),
+        yaxis=dict(gridcolor='rgba(0,0,0,0)'),
+        showlegend=False,
+    )
+    st.caption("최근 구종 사용 비율")
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
 # ── 사이드바: 입력 컨트롤 ────────────────────────────────
@@ -303,39 +358,41 @@ with st.sidebar:
             st.info("CSV 파일을 업로드하면 실제 투구 데이터에서 선택할 수 있습니다.")
 
     else:
-        name_input = st.text_input("투수 이름 (예: Gerrit Cole)", placeholder="Gerrit Cole")
-        days = st.slider("최근 며칠간 데이터에서 찾기", 7, 90, 30)
-        search = st.button("검색", use_container_width=True)
+        query = st.text_input("투수 이름 (2글자 이상, 영어)", placeholder="Gerrit Cole")
+        query = query.strip()
 
-        if search:
-            parts = name_input.strip().split()
-            if len(parts) < 2:
-                st.error("이름과 성을 함께 입력해주세요 (예: Gerrit Cole).")
-                st.session_state.search_df = None
-            else:
-                first, last = parts[0], parts[-1]
-                with st.spinner(f"'{name_input}' 선수 정보를 찾는 중..."):
-                    pid = lookup_pitcher_id(last, first)
+        if query and contains_korean(query):
+            st.warning("영어로 입력해주세요 (예: Gerrit Cole).")
+        elif len(query) >= 2:
+            with st.spinner(f"'{query}' 검색 중..."):
+                try:
+                    candidates = search_pitchers(query)
+                except requests.exceptions.RequestException as e:
+                    candidates = None
+                    st.error(f"선수 검색에 실패했습니다: {e}")
 
-                if pid is None:
-                    st.error(f"'{name_input}' 선수를 찾을 수 없습니다.")
-                    st.session_state.search_df = None
+            if candidates is not None and not candidates:
+                st.error("선수를 찾을 수 없습니다.")
+            elif candidates:
+                options = {
+                    f"{c['name']} ({c['team']}, {c['debut_year']}~)": c for c in candidates
+                }
+                choice = st.selectbox("검색 결과", options=list(options.keys()))
+                chosen = options[choice]
+
+                days = st.slider("최근 며칠간 데이터에서 찾기", 7, 90, 30)
+                end = date.today()
+                start = end - timedelta(days=days)
+                with st.spinner(f"{chosen['name']} 선수의 최근 투구 데이터를 가져오는 중..."):
+                    df = fetch_pitcher_statcast(chosen['id'], start.isoformat(), end.isoformat())
+
+                if df.empty:
+                    st.warning("해당 기간에 투구 데이터가 없습니다. 기간을 늘려보세요.")
                 else:
-                    end = date.today()
-                    start = end - timedelta(days=days)
-                    with st.spinner(f"최근 {days}일간 투구 데이터를 가져오는 중..."):
-                        st.session_state.search_df = fetch_pitcher_statcast(
-                            pid, start.isoformat(), end.isoformat()
-                        )
-
-        # 검색 결과는 세션 상태에 저장해, 아래 selectbox 조작으로 스크립트가
-        # 다시 실행되어도(버튼 상태는 초기화되어도) 결과가 유지되도록 한다.
-        search_df = st.session_state.get('search_df')
-        if search_df is not None:
-            if search_df.empty:
-                st.warning("해당 기간에 투구 데이터가 없습니다. 기간을 늘려보세요.")
-            else:
-                select_and_predict_from_df(search_df)
+                    render_pitch_mix(df)
+                    select_and_predict_from_df(df)
+        elif query:
+            st.caption("2글자 이상 입력하면 검색됩니다.")
 
     st.markdown("---")
     with st.expander("구종별 만들기 가이드"):
