@@ -4,7 +4,7 @@ import os
 import pickle
 import numpy as np
 import streamlit as st
-import tensorflow as tf
+import tf_keras as tf
 
 MODEL_DIR    = os.path.join(os.path.dirname(__file__), 'model')
 MODEL_PATH   = os.path.join(MODEL_DIR, 'pitch_model.h5')
@@ -43,7 +43,7 @@ SAMPLE_VALUES = {
 @st.cache_resource(show_spinner=False)
 def load_artifacts():
     """모델, 스케일러, 레이블 인코더를 1회만 로드해 세션 내내 재사용한다."""
-    model = tf.keras.models.load_model(MODEL_PATH)
+    model = tf.models.load_model(MODEL_PATH)
     with open(SCALER_PATH, 'rb') as f:
         scaler = pickle.load(f)
     with open(ENCODER_PATH, 'rb') as f:
