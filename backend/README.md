@@ -45,8 +45,36 @@ uvicorn main:app --reload --port 8000
 
 헬스체크용 엔드포인트.
 
-## 배포
+## 배포 (Render)
 
-`streamlit_app`에서 이 서버를 호출하려면 `BACKEND_URL` 환경변수(또는 Streamlit
-secrets의 `BACKEND_URL`)를 이 서버의 공개 URL로 설정해야 합니다. 기본값은
-`http://localhost:8000`이며 로컬 개발용입니다.
+리포지토리 루트의 `render.yaml`이 Render Blueprint 설정을 정의합니다
+(`rootDir: backend`, 빌드/시작 커맨드, 무료 플랜). 배포 절차:
+
+1. [Render 대시보드](https://dashboard.render.com)에서 **New > Blueprint**를 선택하고
+   이 GitHub 저장소(`gaeun1961/mlb-pitch-classifier`)를 연결합니다.
+2. Render가 `render.yaml`을 읽어 `mlb-pitch-classifier-api` 서비스를 자동 구성합니다.
+   그대로 **Apply**를 눌러 배포를 시작합니다.
+3. 첫 빌드는 `tensorflow-cpu` 설치 때문에 몇 분 정도 걸릴 수 있습니다. 빌드가
+   끝나면 `https://<서비스 이름>.onrender.com` 형태의 공개 URL이 발급됩니다.
+4. 배포 후 `https://<서비스 URL>/health`에 접속해 `{"status": "ok"}`가 반환되는지 확인합니다.
+
+> Render Blueprint 대신 수동으로 만들 경우: New Web Service → 이 저장소 선택 →
+> Root Directory `backend` → Build Command `pip install -r requirements.txt` →
+> Start Command `uvicorn main:app --host 0.0.0.0 --port $PORT` → Instance Type Free.
+
+무료 플랜은 일정 시간 트래픽이 없으면 슬립 상태로 전환되며, 다음 요청 시
+콜드 스타트로 응답이 수십 초 지연될 수 있습니다. TensorFlow 모델 로딩 자체도
+콜드 스타트를 늘리는 요인이니 참고하세요.
+
+### Streamlit Cloud에 BACKEND_URL 연결
+
+`streamlit_app`이 이 서버를 호출하려면 `BACKEND_URL`을 서버의 공개 URL로
+설정해야 합니다. 로컬 실행 시 기본값은 `http://localhost:8000`입니다.
+
+Streamlit Cloud 앱 설정 → **Settings > Secrets**에 다음을 추가합니다:
+
+```toml
+BACKEND_URL = "https://<서비스 이름>.onrender.com"
+```
+
+저장하면 앱이 재시작되며 이후 예측 요청은 배포된 FastAPI 백엔드로 전달됩니다.
