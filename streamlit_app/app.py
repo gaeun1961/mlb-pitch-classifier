@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -168,6 +169,19 @@ if 'label' not in st.session_state:
     st.session_state.label = None
     st.session_state.conf = None
     st.session_state.proba = None
+    st.session_state.explanation = None
+
+
+def run_prediction(inp):
+    """백엔드 예측을 호출하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다."""
+    try:
+        label, conf, proba, explanation = predict(inp)
+        st.session_state.label = label
+        st.session_state.conf = conf
+        st.session_state.proba = proba
+        st.session_state.explanation = explanation
+    except requests.exceptions.RequestException as e:
+        st.error(f"예측 서버에 연결할 수 없습니다: {e}")
 
 # ── 사이드바: 입력 컨트롤 ────────────────────────────────
 with st.sidebar:
@@ -213,7 +227,7 @@ with st.sidebar:
             'plate_x': round(float(np.clip(rx + vx0*t + 0.5*ax_*t**2, -2, 2)), 3),
         })
         st.session_state.inp = inp
-        st.session_state.label, st.session_state.conf, st.session_state.proba = predict(inp)
+        run_prediction(inp)
 
     else:
         uploaded = st.file_uploader("Statcast CSV 업로드", type=["csv"])
@@ -237,7 +251,7 @@ with st.sidebar:
                 st.session_state.inp = inp
                 if 'p_throws' in df_valid.columns:
                     st.session_state.p_throws = str(row.get('p_throws', 'R'))
-                st.session_state.label, st.session_state.conf, st.session_state.proba = predict(inp)
+                run_prediction(inp)
         else:
             st.info("CSV 파일을 업로드하면 실제 투구 데이터에서 선택할 수 있습니다.")
 
@@ -274,6 +288,8 @@ if label:
         f'</div>',
         unsafe_allow_html=True
     )
+    if st.session_state.explanation:
+        st.caption(st.session_state.explanation)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
