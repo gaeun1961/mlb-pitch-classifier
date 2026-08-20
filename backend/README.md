@@ -61,9 +61,10 @@ cp .env.example .env
 
 ## 자연어 설명 (Gemini API)
 
-`explain.py`는 예측 구종, 신뢰도, 2순위 구종, 핵심 피처(구속/az/ax/회전수)로
-프롬프트를 구성해 `gemini-3.6-flash`를 호출하고 2~3문장짜리 한국어 설명을 받습니다.
-(`gemini-2.0-flash`는 서비스 종료되어 API가 이 모델로 마이그레이션을 안내합니다.)
+`explain.py`는 예측 구종, 신뢰도, 2순위 구종, 핵심 피처(구속/az/ax/pfx/회전수/투구 손)로
+프롬프트를 구성해 `gemini-2.5-flash-lite`를 호출하고 2~3문장짜리 한국어 설명을 받습니다.
+(`gemini-2.0-flash`는 서비스 종료되었고, `gemini-3.6-flash`는 무료 티어가 하루 20회로
+제한돼 있어 `-lite` 계열로 사용합니다.)
 
 - API 키는 [Google AI Studio](https://aistudio.google.com)에서 발급받습니다.
 - 키는 절대 코드나 저장소에 커밋하지 않고 `GEMINI_API_KEY` 환경변수로만 전달합니다.

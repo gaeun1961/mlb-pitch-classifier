@@ -89,7 +89,7 @@ Streamlit은 모델을 직접 로드하지 않고, 17개 Statcast 피처를 Fast
 - **언어/환경**: Python 3.9+ (backend는 Python 3.11)
 - **딥러닝**: TensorFlow / Keras (3층 MLP, BatchNorm + Dropout)
 - **백엔드**: FastAPI, Render (무료 플랜)
-- **자연어 설명**: Gemini API (`gemini-3.6-flash`), 실패 시 규칙 기반 설명으로 자동 폴백
+- **자연어 설명**: Gemini API (`gemini-2.5-flash-lite`), 실패 시 규칙 기반 설명으로 자동 폴백
 - **실제 투수 데이터**: [pybaseball](https://github.com/jldbc/pybaseball) (MLB Statcast 조회, 웹 UI의 투수 검색 기능에 사용)
 - **웹 UI**: Streamlit + Plotly
 - **데스크톱 UI**: tkinter + matplotlib
