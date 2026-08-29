@@ -56,15 +56,6 @@ GUIDE_ROWS = [
     ('FS', '스플리터', '83-90', 'az−−−', '~0'),
 ]
 
-# 무브먼트 차트 배경 분포용 (ax, az) 대략 범위 — 가이드 테이블을 수치화한 근사값.
-# 우완 기준이며 좌완이면 ax 부호를 반전한다.
-REF_RANGES = {
-    'FF': (-5, 5, -16, -6),   'SI': (4, 14, -22, -12),
-    'SL': (8, 20, -16, -4),   'CU': (-16, -4, -30, -18),
-    'CH': (6, 16, -24, -14),  'FC': (-8, 0, -14, -4),
-    'FS': (-5, 5, -34, -24),
-}
-
 # ── 디자인 토큰 · 라이트 테마 CSS ────────────────────────
 # Streamlit은 매 rerun마다 DOM을 새로 만들므로 이 <style>도 매번 재주입돼야 한다.
 # 문자열은 모듈 상수라 재생성 비용은 없다(= 성능 병목 아님).
@@ -171,6 +162,8 @@ if 'p_throws' not in st.session_state:
     st.session_state.p_throws = 'R'
 if 'history' not in st.session_state:
     st.session_state.history = []          # 이번 세션에서 예측해 본 (ax, az) 이력
+if 'movement_bg' not in st.session_state:
+    st.session_state.movement_bg = None    # (ax[], az[]) — 실제 데이터 로드 시에만 채움
 if 'label' not in st.session_state:
     st.session_state.label = None
     st.session_state.conf = None
@@ -236,6 +229,13 @@ def select_and_predict_from_df(df):
         return
 
     st.success(f"{len(df_valid):,}개 투구 로드 완료")
+
+    # 무브먼트 차트 배경 = 이 데이터셋의 실제 ax/az 분포 (합성 클러스터 아님)
+    bg = df_valid[['ax', 'az']]
+    if len(bg) > 500:
+        bg = bg.sample(500, random_state=0)
+    st.session_state.movement_bg = (bg['ax'].tolist(), bg['az'].tolist())
+
     show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
                               'release_spin_rate', 'game_date'] if c in df_valid.columns]
     idx = st.selectbox(
@@ -390,56 +390,47 @@ def render_prob_dist(proba, label):
     st.markdown(rows, unsafe_allow_html=True)
 
 
-@st.cache_data(show_spinner=False)
-def movement_reference(p_throws):
-    """가이드 범위(REF_RANGES)에서 구종별 배경 포인트를 생성한다. p_throws별로 1회만 계산."""
-    rng = np.random.default_rng(42)
-    mirror = -1.0 if p_throws == 'L' else 1.0
-    xs, ys = [], []
-    for axlo, axhi, azlo, azhi in REF_RANGES.values():
-        xs.extend(rng.uniform(axlo, axhi, 18) * mirror)
-        ys.extend(rng.uniform(azlo, azhi, 18))
-    return xs, ys
-
-
-def render_movement(inp, label, p_throws):
-    """수평(ax)·수직(az) 무브먼트 평면. 회색 배경 분포 + 세션 이력 위에 현재 투구를 빨간 링으로."""
+def render_movement(inp):
+    """수평(ax)·수직(az) 평면 위 현재 투구(빨간 링). 배경 회색 점은 실제 데이터가
+    로드됐을 때만 그 데이터셋의 실제 분포로 표시하고, 슬라이더 모드에서는 이번 세션에
+    예측해 본 이력만 찍는다. ax·az는 모델이 쓰는 17개 피처 중 2개일 뿐이라 위치가
+    구종을 결정하지 않는다 — 그래서 합성 클러스터/구종 라벨은 두지 않는다.
+    """
     st.markdown('<div class="pw-label">궤적 · 무브먼트 차트</div>', unsafe_allow_html=True)
-    ref_x, ref_y = movement_reference(p_throws)
-    mirror = -1.0 if p_throws == 'L' else 1.0
+    bg = st.session_state.get('movement_bg')
+    hist = st.session_state.history
 
     fig = go.Figure()
     fig.add_hline(y=0, line_color=GRID)
     fig.add_vline(x=0, line_color=GRID)
-    fig.add_trace(go.Scatter(x=ref_x, y=ref_y, mode='markers',
-                             marker=dict(size=6, color=GRAY_SOFT), hoverinfo='skip'))
 
-    hist = st.session_state.history
-    if len(hist) > 1:
+    if bg:
+        fig.add_trace(go.Scatter(x=bg[0], y=bg[1], mode='markers',
+                                 marker=dict(size=5, color=GRAY_SOFT), hoverinfo='skip'))
+        ctx = "회색 점 = 불러온 실제 투구 분포"
+    elif hist:
         fig.add_trace(go.Scatter(
-            x=[h[0] for h in hist[:-1]], y=[h[1] for h in hist[:-1]], mode='markers',
+            x=[h[0] for h in hist], y=[h[1] for h in hist], mode='markers',
             marker=dict(size=7, color=GRAY_TRAIL), hoverinfo='skip',
         ))
+        ctx = "회색 점 = 이번 세션에서 예측해 본 투구"
+    else:
+        ctx = "슬라이더를 움직이면 예측 이력이 쌓입니다"
 
     fig.add_trace(go.Scatter(x=[inp['ax']], y=[inp['az']], mode='markers',
                              marker=dict(size=22, color='rgba(0,0,0,0)',
                                          line=dict(color=ACCENT_HEX, width=3))))
     fig.add_trace(go.Scatter(x=[inp['ax']], y=[inp['az']], mode='markers',
                              marker=dict(size=7, color=ACCENT_HEX)))
-
-    ann = [
-        dict(x=(lo + hi) / 2 * mirror, y=(zlo + zhi) / 2, text=PITCH_NAMES[c],
-             showarrow=False, font=dict(size=9, color="rgba(138,143,152,0.75)"))
-        for c, (lo, hi, zlo, zhi) in REF_RANGES.items()
-    ]
     fig.update_layout(
         height=320, margin=dict(l=44, r=20, t=10, b=38),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=AXIS_TEXT, size=11), showlegend=False, annotations=ann,
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
         xaxis=dict(title='수평 무브먼트 (ax)', range=[-30, 30], gridcolor=GRID, zeroline=False),
         yaxis=dict(title='수직 무브먼트 (az)', range=[-50, 15], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    st.caption(f"빨간 링 = 현재 예측 투구 · {ctx}. ax·az는 모델이 쓰는 17개 피처 중 2개입니다.")
 
 
 def render_trajectory(inp, p_throws, label):
@@ -451,11 +442,15 @@ def render_trajectory(inp, p_throws, label):
         side_x, side_z = compute_trajectory_side(inp)
         top_y, top_x = compute_trajectory_top(inp, p_throws)
 
+        # 측면뷰: 홈플레이트에 스트라이크존 높이(1.5~3.5ft) 사각형 → 공이 존 위/아래로
+        # 어디쯤 지나갔는지 바로 보인다.
         fig = go.Figure()
+        fig.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=1.5, y1=3.5,
+                      line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
         fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
                                  line=dict(color=ACCENT_HEX, width=3)))
-        fig.add_trace(go.Scatter(x=[side_x[0]], y=[side_z[0]], mode='markers',
-                                 marker=dict(color=ACCENT_HEX, size=8)))
+        fig.add_trace(go.Scatter(x=[side_x[0], side_x[-1]], y=[side_z[0], side_z[-1]],
+                                 mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
         fig.update_layout(
             height=250, margin=dict(l=40, r=10, t=10, b=30),
             plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
@@ -465,10 +460,13 @@ def render_trajectory(inp, p_throws, label):
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
+        # 상단뷰: 홈플레이트에 존 폭(±0.83ft) 사각형
         fig2 = go.Figure()
+        fig2.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=-0.83, y1=0.83,
+                       line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
         fig2.add_trace(go.Scatter(x=top_y, y=top_x, mode='lines', line=dict(color=ACCENT_HEX, width=3)))
-        fig2.add_trace(go.Scatter(x=[top_y[0]], y=[top_x[0]], mode='markers',
-                                  marker=dict(color=ACCENT_HEX, size=8)))
+        fig2.add_trace(go.Scatter(x=[top_y[0], top_y[-1]], y=[top_x[0], top_x[-1]],
+                                  mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
         fig2.add_hline(y=0, line_dash='dash', line_color=GRID)
         fig2.update_layout(
             height=200, margin=dict(l=40, r=10, t=10, b=30),
@@ -478,6 +476,7 @@ def render_trajectory(inp, p_throws, label):
             yaxis=dict(title='좌우 (ft)', range=[-3, 3], gridcolor=GRID, zeroline=False),
         )
         st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
+        st.caption("회색 사각형 = 홈플레이트 스트라이크존 · 빨간 점 = 릴리스·플레이트 통과 지점")
 
     with c2:
         st.markdown('<div class="pw-label">스트라이크존</div>', unsafe_allow_html=True)
@@ -701,6 +700,7 @@ with st.sidebar:
             'plate_x': round(float(np.clip(rx + vx0*t + 0.5*ax_*t**2, -2, 2)), 3),
         })
         st.session_state.inp = inp
+        st.session_state.movement_bg = None   # 슬라이더 모드엔 실제 데이터 배경 없음
         run_prediction(inp)   # 위젯 변경 시 Streamlit이 자동 rerun → 여기서 즉시 재예측
 
     else:
@@ -775,10 +775,12 @@ attribution = st.session_state.attribution
 explanation = st.session_state.explanation
 inf_ms = st.session_state.get('inf_ms', 0.0)
 
-# 요약 줄은 탭 바깥 · 항상 보이게
-if label:
-    with st.container(border=True):
-        render_summary(label, conf, inf_ms)
+def summary_card():
+    """예측 요약 칩 — 각 탭 바 바로 아래에 반복 렌더해 어느 탭에서도 보이게 한다."""
+    if label:
+        with st.container(border=True):
+            render_summary(label, conf, inf_ms)
+
 
 left, right = st.columns([2.2, 1], gap="large")
 
@@ -786,19 +788,22 @@ with left:
     tab_dash, tab_traj, tab_model = st.tabs(["대시보드", "궤적 분석", "모델 정보"])
 
     with tab_dash:
+        summary_card()
         if label and proba:
             with st.container(border=True):
                 render_prob_dist(proba, label)
             with st.container(border=True):
-                render_movement(inp, label, st.session_state.p_throws)
+                render_movement(inp)
         else:
             st.info("사이드바에서 값을 조절해 예측을 실행하세요.")
 
     with tab_traj:
+        summary_card()
         with st.container(border=True):
             render_trajectory(inp, st.session_state.p_throws, label)
 
     with tab_model:
+        summary_card()
         with st.container(border=True):
             render_model_info()
 
