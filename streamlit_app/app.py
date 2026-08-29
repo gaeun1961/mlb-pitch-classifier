@@ -172,6 +172,7 @@ if 'label' not in st.session_state:
     st.session_state.label = None
     st.session_state.conf = None
     st.session_state.proba = None
+    st.session_state.attribution = None
     st.session_state.explanation = None
 if 'warmed_up' not in st.session_state:
     st.session_state.warmed_up = False
@@ -185,10 +186,11 @@ def run_prediction(inp):
     )
     try:
         with st.spinner(spinner_msg):
-            label, conf, proba, explanation = predict(inp, st.session_state.p_throws)
+            label, conf, proba, attribution, explanation = predict(inp, st.session_state.p_throws)
         st.session_state.label = label
         st.session_state.conf = conf
         st.session_state.proba = proba
+        st.session_state.attribution = attribution
         st.session_state.explanation = explanation
         st.session_state.warmed_up = True
     except Exception as e:
@@ -292,6 +294,36 @@ def fetch_pitcher_statcast(player_id, start_dt, end_dt):
     from pybaseball import statcast_pitcher
 
     return statcast_pitcher(start_dt, end_dt, player_id)
+
+
+def render_attribution(attribution, label):
+    """이 예측에 각 피처가 기여한 방향·크기를 상위 7개만 가로 막대로 보여준다.
+
+    값은 예측 클래스 확률을 표준화된 입력으로 편미분한 gradient×input 이라
+    절대 단위가 아니라 부호와 상대 크기로 읽는다.
+    """
+    items = sorted(attribution.items(), key=lambda kv: abs(kv[1]))[-7:]
+    names = [k for k, _ in items]
+    vals = [v for _, v in items]
+    colors = ['#2D9D6F' if v >= 0 else '#C8443C' for v in vals]
+
+    fig = go.Figure(go.Bar(
+        x=vals, y=names, orientation='h', marker_color=colors,
+        text=[f'{v:+.2f}' for v in vals], textposition='outside',
+        textfont=dict(color="#9CACC0", size=11),
+    ))
+    fig.update_layout(
+        height=max(180, 42 * len(items)), margin=dict(l=10, r=44, t=10, b=30),
+        plot_bgcolor="#142840", paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color="#9CACC0", size=11),
+        xaxis=dict(title='기여도 (gradient×input · 표준화 피처)',
+                   gridcolor="rgba(255,255,255,0.07)", zeroline=True, zerolinecolor="#6B7B91"),
+        yaxis=dict(gridcolor='rgba(0,0,0,0)'),
+        showlegend=False,
+    )
+    st.caption(f"모델이 이 투구를 {label}로 예측하는 데 각 피처가 기여한 방향 · "
+               "초록=예측을 밀어올림, 빨강=끌어내림")
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
 def render_pitch_mix(df):
@@ -468,6 +500,8 @@ if label:
     )
     if st.session_state.explanation:
         st.caption(st.session_state.explanation)
+    if st.session_state.attribution:
+        render_attribution(st.session_state.attribution, label)
 
 st.markdown("<br>", unsafe_allow_html=True)
 

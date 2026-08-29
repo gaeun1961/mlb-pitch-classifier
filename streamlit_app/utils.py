@@ -45,10 +45,10 @@ SAMPLE_VALUES = {
 
 
 def predict(input_dict, p_throws='R'):
-    """모델을 직접 로드해 (예측 구종, 신뢰도, 확률 딕셔너리, 설명)을 반환한다."""
-    label, confidence, proba = _model_predict(input_dict)
+    """모델을 직접 로드해 (예측 구종, 신뢰도, 확률 딕셔너리, 피처 기여도, 설명)을 반환한다."""
+    label, confidence, proba, attribution = _model_predict(input_dict)
     explanation = generate_explanation(input_dict, label, confidence, proba, p_throws)
-    return label, confidence, proba, explanation
+    return label, confidence, proba, attribution, explanation
 
 
 def compute_trajectory_side(inp, n=50):
