@@ -181,7 +181,7 @@ def run_prediction(inp):
     """백엔드 예측을 호출하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다."""
     spinner_msg = (
         "예측 중입니다..." if st.session_state.warmed_up
-        else "예측 중입니다... (첫 요청은 서버 웜업으로 최대 50초 정도 걸릴 수 있어요)"
+        else "예측 중입니다... (첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요)"
     )
     try:
         with st.spinner(spinner_msg):
@@ -191,8 +191,8 @@ def run_prediction(inp):
         st.session_state.proba = proba
         st.session_state.explanation = explanation
         st.session_state.warmed_up = True
-    except requests.exceptions.RequestException as e:
-        st.error(f"예측 서버에 연결할 수 없습니다: {e}")
+    except Exception as e:
+        st.error(f"예측에 실패했습니다: {e}")
 
 
 def select_and_predict_from_df(df):
@@ -326,7 +326,7 @@ def render_pitch_mix(df):
 # ── 사이드바: 입력 컨트롤 ────────────────────────────────
 with st.sidebar:
     st.markdown("### 투구 만들기")
-    st.caption("⏱️ 첫 예측은 백엔드 서버 웜업으로 최대 50초 정도 걸릴 수 있어요.")
+    st.caption("⏱️ 첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요. 이후에는 즉시 응답합니다.")
     mode = st.radio(
         "입력 방식",
         ["슬라이더로 직접 조절", "CSV에서 실제 투구 선택", "투수 이름으로 검색"],

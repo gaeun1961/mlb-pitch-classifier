@@ -1,14 +1,19 @@
-"""utils.py - FastAPI 백엔드 호출 및 궤적 계산 유틸리티"""
+"""utils.py - 모델 직접 로드 예측 및 궤적 계산 유틸리티
 
-import os
+backend/ 의 추론 코드(model_utils, explain)를 그대로 재사용한다. Streamlit Cloud는
+레포 전체를 배포하므로 backend/model/ 아티팩트도 함께 올라오고, 경로는 각 모듈이
+자기 파일 기준으로 잡으므로 import 위치와 무관하게 동작한다.
+"""
+
+import sys
+from pathlib import Path
+
 import numpy as np
-import requests
-import streamlit as st
 
-try:
-    BACKEND_URL = st.secrets["BACKEND_URL"]
-except Exception:
-    BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
+sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+
+from model_utils import predict as _model_predict  # noqa: E402
+from explain import generate_explanation  # noqa: E402
 
 FEATURE_COLS = [
     'release_speed', 'release_spin_rate', 'release_extension',
@@ -40,12 +45,10 @@ SAMPLE_VALUES = {
 
 
 def predict(input_dict, p_throws='R'):
-    """FastAPI 백엔드에 예측을 요청해 (예측 구종, 신뢰도, 확률 딕셔너리, 설명)을 반환한다."""
-    payload = dict(input_dict, p_throws=p_throws)
-    resp = requests.post(f"{BACKEND_URL}/predict", json=payload, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    return data['predicted_label'], data['confidence'], data['probabilities'], data['explanation']
+    """모델을 직접 로드해 (예측 구종, 신뢰도, 확률 딕셔너리, 설명)을 반환한다."""
+    label, confidence, proba = _model_predict(input_dict)
+    explanation = generate_explanation(input_dict, label, confidence, proba, p_throws)
+    return label, confidence, proba, explanation
 
 
 def compute_trajectory_side(inp, n=50):

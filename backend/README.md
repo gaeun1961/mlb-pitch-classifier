@@ -1,7 +1,8 @@
 # Backend (FastAPI)
 
-MLB Pitch Classifier의 예측 API 서버입니다. 모델 로딩, 예측, 자연어 설명 생성을 담당하며
-`streamlit_app`은 이 서버를 HTTP로 호출합니다.
+MLB Pitch Classifier의 예측 API 서버입니다. 모델 로딩, 예측, 자연어 설명 생성을 담당합니다.
+`model_utils.py`·`explain.py`가 추론 코드의 원본이며, 배포된 웹 데모(`streamlit_app`)는
+이 두 모듈을 그대로 import 해 재사용합니다. 이 FastAPI 서버는 로컬 실행·구조 참고용입니다.
 
 ## 실행
 
@@ -74,40 +75,14 @@ cp .env.example .env
   실사용에는 부족했습니다). 한도를 초과해도 위 폴백 덕분에 서비스는 계속되지만, 응답이
   자연어 설명 대신 규칙 기반 문장으로 조용히 바뀝니다.
 
-## 배포 (Render)
+## 과거 배포 (Render, 현재 미사용)
 
-리포지토리 루트의 `render.yaml`이 Render Blueprint 설정을 정의합니다
-(`rootDir: backend`, 빌드/시작 커맨드, 무료 플랜). 배포 절차:
+초기에는 이 서버를 Render 무료 플랜에 배포하고 `streamlit_app`이 `BACKEND_URL`로
+HTTP 호출했습니다. 무료 플랜의 콜드 스타트(최대 ~50초, TensorFlow 로딩 포함)로
+데모 UX가 나빠, 현재는 Streamlit Cloud가 위 추론 코드를 직접 import 하는 구조로
+전환했고 Render 배포는 중단했습니다.
 
-1. [Render 대시보드](https://dashboard.render.com)에서 **New > Blueprint**를 선택하고
-   이 GitHub 저장소(`gaeun1961/mlb-pitch-classifier`)를 연결합니다.
-2. Render가 `render.yaml`을 읽어 `mlb-pitch-classifier-api` 서비스를 자동 구성합니다.
-   그대로 **Apply**를 눌러 배포를 시작합니다.
-3. 첫 빌드는 `tensorflow-cpu` 설치 때문에 몇 분 정도 걸릴 수 있습니다. 빌드가
-   끝나면 `https://<서비스 이름>.onrender.com` 형태의 공개 URL이 발급됩니다.
-4. 배포 후 `https://<서비스 URL>/health`에 접속해 `{"status": "ok"}`가 반환되는지 확인합니다.
-
-> Render Blueprint 대신 수동으로 만들 경우: New Web Service → 이 저장소 선택 →
-> Root Directory `backend` → Build Command `pip install -r requirements.txt` →
-> Start Command `uvicorn main:app --host 0.0.0.0 --port $PORT` → Instance Type Free.
-
-`render.yaml`에 `GEMINI_API_KEY`가 `sync: false`로 선언되어 있어 Blueprint 적용 시
-값 입력을 요구합니다. Blueprint 생성 시 바로 입력하거나, 이후 Render 대시보드의
-서비스 → **Environment** 탭에서 `GEMINI_API_KEY`를 추가/수정할 수 있습니다.
-
-무료 플랜은 일정 시간 트래픽이 없으면 슬립 상태로 전환되며, 다음 요청 시
-콜드 스타트로 응답이 수십 초 지연될 수 있습니다. TensorFlow 모델 로딩 자체도
-콜드 스타트를 늘리는 요인이니 참고하세요.
-
-### Streamlit Cloud에 BACKEND_URL 연결
-
-`streamlit_app`이 이 서버를 호출하려면 `BACKEND_URL`을 서버의 공개 URL로
-설정해야 합니다. 로컬 실행 시 기본값은 `http://localhost:8000`입니다.
-
-Streamlit Cloud 앱 설정 → **Settings > Secrets**에 다음을 추가합니다:
-
-```toml
-BACKEND_URL = "https://<서비스 이름>.onrender.com"
-```
-
-저장하면 앱이 재시작되며 이후 예측 요청은 배포된 FastAPI 백엔드로 전달됩니다.
+리포지토리 루트의 `render.yaml`은 당시 Blueprint 설정(`rootDir: backend`, 빌드/시작
+커맨드, 무료 플랜)을 참고용으로 남겨둔 것입니다. 다시 API 서버로 띄우려면 Render에서
+**New > Blueprint**로 이 저장소를 연결하면 `render.yaml`이 그대로 적용됩니다
+(`GEMINI_API_KEY`는 `sync: false`라 배포 시 값 입력을 요구).
