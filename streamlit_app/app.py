@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 
 from utils import (
     predict, compute_trajectory_side, compute_trajectory_top,
-    FEATURE_COLS, PITCH_NAMES, PITCH_COLORS, SAMPLE_VALUES, PITCH_DIST,
+    FEATURE_COLS, PITCH_NAMES, SAMPLE_VALUES, PITCH_DIST,
 )
 
 st.set_page_config(
@@ -22,10 +22,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-ACCENT_HEX = "#c53637"
-NEUTRAL_HEX = "#7d8086"
+ACCENT_HEX = "#c53637"      # 빨강 = 지금 예측된 구종
+INK = "#1c1f24"             # 본문
+GRAY = "#8a8f98"            # 중립 바/마커
+GRAY_SOFT = "rgba(138,143,152,0.28)"   # 배경 레퍼런스 포인트
+GRAY_TRAIL = "rgba(80,86,94,0.5)"      # 세션 이력 포인트
+ZONE_LINE = "#7d8086"
 PLOT_BG = "#ffffff"
-GRID = "#eef0f2"
+GRID = "#eceef0"
 AXIS_TEXT = "#50565e"
 
 FEAT_KR = {
@@ -38,35 +42,68 @@ FEAT_KR = {
     'spin_axis': '회전축',
 }
 
+PITCH_ORDER = ['FF', 'SI', 'SL', 'CU', 'CH', 'FC', 'FS']
+
+# 구종별 만들기 가이드 = (코드, 이름, 구속, az 힌트, ax 힌트)
+# ax 힌트는 우완 기준 · 좌완은 좌우(+/−)가 반전된다.
+GUIDE_ROWS = [
+    ('FF', '포심패스트볼', '93+', 'az↑', '~0'),
+    ('SI', '싱커', '92+', 'az↓살짝', '+'),
+    ('SL', '슬라이더', '82-88', 'az0/−', '++'),
+    ('CU', '커브', '75-82', 'az−−', '−'),
+    ('CH', '체인지업', '80-87', 'az−', '+'),
+    ('FC', '커터', '88-94', 'az~0', '−'),
+    ('FS', '스플리터', '83-90', 'az−−−', '~0'),
+]
+
+# 무브먼트 차트 배경 분포용 (ax, az) 대략 범위 — 가이드 테이블을 수치화한 근사값.
+# 우완 기준이며 좌완이면 ax 부호를 반전한다.
+REF_RANGES = {
+    'FF': (-5, 5, -16, -6),   'SI': (4, 14, -22, -12),
+    'SL': (8, 20, -16, -4),   'CU': (-16, -4, -30, -18),
+    'CH': (6, 16, -24, -14),  'FC': (-8, 0, -14, -4),
+    'FS': (-5, 5, -34, -24),
+}
+
 # ── 디자인 토큰 · 라이트 테마 CSS ────────────────────────
+# Streamlit은 매 rerun마다 DOM을 새로 만들므로 이 <style>도 매번 재주입돼야 한다.
+# 문자열은 모듈 상수라 재생성 비용은 없다(= 성능 병목 아님).
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap');
 
 :root{
-  --bg: oklch(96% 0.003 260);
   --card:#ffffff;
-  --card-border: oklch(90% 0.006 260);
-  --text: oklch(18% 0.01 260);
-  --text-2: oklch(45% 0.015 260);
-  --text-3: oklch(56% 0.02 260);
-  --label: oklch(50% 0.02 265);
-  --accent: oklch(55% 0.18 25);
-  --accent-hover: oklch(46% 0.18 25);
-  --chip-bg: oklch(94% 0.045 25);
-  --chip-text: oklch(45% 0.16 25);
-  --chip-gray: oklch(94% 0.005 260);
-  --track: oklch(91% 0.006 260);
+  --card-border:#e3e5e8;
+  --text:#1c1f24;
+  --text-2:#565b63;
+  --text-3:#7a8089;
+  --label:#6b7078;
+  --accent:#c53637;
+  --chip-gray:#f4f5f6;
+  --track:#e9eaec;
 }
 
 html,body,[class*="css"]{font-family:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
-.stApp{background:var(--bg);color:var(--text);}
+.stApp{background:#ffffff;color:var(--text);}
 h1,h2,h3,h4{font-family:'Sora',sans-serif !important;color:var(--text);}
-#MainMenu,footer,header[data-testid="stHeader"]{visibility:hidden;}
+#MainMenu,footer{visibility:hidden;}
+header[data-testid="stHeader"]{height:0 !important;visibility:hidden;}
 hr{border-color:var(--card-border) !important;}
 
+/* 상단 여백 축소 */
+[data-testid="stMainBlockContainer"],.block-container{padding-top:1.1rem !important;}
+
+/* 사이드바 컴팩트화 */
 section[data-testid="stSidebar"]{background:var(--card);border-right:1px solid var(--card-border);}
-section[data-testid="stSidebar"] .block-container{padding-top:1rem;}
+section[data-testid="stSidebar"] .block-container{padding:0.7rem 1rem 1rem;}
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:0.5rem;}
+section[data-testid="stSidebar"] hr{margin:0.45rem 0 !important;}
+section[data-testid="stSidebar"] [data-testid="stSlider"]{padding-bottom:0.15rem;}
+section[data-testid="stSidebar"] [data-testid="stSliderTickBar"]{display:none;}
+section[data-testid="stSidebar"] [data-testid="stWidgetLabel"]{margin-bottom:0.1rem;}
+section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p{font-size:0.82rem;}
+section[data-testid="stSidebar"] .stExpander{margin-top:0.2rem;}
 
 div[data-testid="stVerticalBlockBorderWrapper"]{
   background:var(--card);
@@ -74,27 +111,25 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   border-radius:16px !important;
   box-shadow:0 1px 2px rgba(16,24,40,0.03);
 }
-div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:16px 18px;}
+div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 
 .pw-label{font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--label);margin-bottom:10px;}
 
-.pw-logo{display:flex;align-items:center;gap:9px;margin:2px 0 14px;}
+.pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
 .pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
 
+/* 결과 요약 칩 — 예측 구종만 빨간 외곽선, 나머지는 회색 보더 */
 .pw-summary{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
-.pw-sum-pred{display:inline-flex;align-items:center;gap:7px;font-family:'Sora';font-weight:700;font-size:0.95rem;color:var(--text);background:var(--chip-bg);padding:6px 12px;border-radius:999px;}
-.pw-sum-pred i{width:8px;height:8px;border-radius:50%;display:inline-block;}
-.pw-sum-chip{font-size:0.8rem;font-weight:600;color:var(--text-2);background:var(--chip-gray);padding:6px 12px;border-radius:999px;}
+.pw-sum-pred{display:inline-flex;align-items:center;gap:7px;font-family:'Sora';font-weight:700;font-size:0.95rem;color:var(--text);background:#fff;border:1.5px solid var(--accent);padding:5px 12px;border-radius:999px;}
+.pw-sum-pred i{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;}
+.pw-sum-chip{font-size:0.8rem;font-weight:600;color:var(--text-2);background:#fff;border:1px solid var(--card-border);padding:5px 12px;border-radius:999px;}
 
-.pw-bar-row{display:flex;align-items:center;gap:10px;margin:7px 0;}
+/* 구종별 확률 바 — 전부 회색, 예측 구종만 빨강 */
+.pw-bar-row{display:flex;align-items:center;gap:10px;margin:6px 0;}
 .pw-bar-name{width:82px;font-size:0.82rem;color:var(--text-2);flex:none;}
 .pw-bar-track{flex:1;height:8px;background:var(--track);border-radius:999px;overflow:hidden;}
 .pw-bar-fill{display:block;height:100%;border-radius:999px;}
 .pw-bar-pct{width:40px;text-align:right;font-size:0.8rem;font-weight:600;color:var(--text);flex:none;}
-
-.pw-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;}
-.pw-leg{display:inline-flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-3);}
-.pw-leg i{width:8px;height:8px;border-radius:50%;}
 
 .pw-shap-head{display:flex;align-items:center;gap:8px;font-family:'Sora';font-weight:700;font-size:1rem;color:var(--text);}
 .pw-shap-sub{font-size:0.78rem;color:var(--text-3);margin:2px 0 12px;}
@@ -103,20 +138,15 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:16px 18px;}
 .pw-fcard{border:1px solid var(--card-border);border-radius:12px;padding:11px 13px;margin-bottom:9px;}
 .pw-fcard-top{display:flex;justify-content:space-between;align-items:center;}
 .pw-fname{font-size:0.85rem;font-weight:600;color:var(--text);}
-.pw-fbadge{font-size:0.75rem;font-weight:700;padding:2px 8px;border-radius:999px;}
-.pw-fbadge.pos{background:var(--chip-bg);color:var(--chip-text);}
-.pw-fbadge.neg{background:var(--chip-gray);color:var(--text-2);}
+.pw-fbadge{font-size:0.75rem;font-weight:700;padding:2px 8px;border-radius:999px;background:#fff;border:1px solid var(--card-border);color:var(--text-2);}
+.pw-fbadge.pos{color:var(--accent);border-color:var(--accent);}
 .pw-fmag{height:3px;background:var(--track);border-radius:999px;margin:9px 0 8px;overflow:hidden;}
 .pw-fmag span{display:block;height:100%;border-radius:999px;}
 .pw-fdesc{font-size:0.78rem;line-height:1.55;color:var(--text-3);margin:0;}
 
-.pw-grow{display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-2);padding:4px 0;}
-.pw-gcode{font-family:'Sora';font-weight:700;font-size:0.68rem;background:var(--chip-bg);color:var(--chip-text);padding:2px 6px;border-radius:5px;flex:none;}
-.pw-gnote{font-size:9px;color:var(--text-3);margin-top:8px;}
-
-.stButton > button{background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:700;width:100%;padding:9px 0;}
-.stButton > button:hover{background:var(--accent-hover);color:#fff;}
-.stButton > button:focus{color:#fff;box-shadow:none;}
+.pw-grow{display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-2);padding:3px 0;}
+.pw-gcode{font-family:'Sora';font-weight:700;font-size:0.68rem;background:var(--chip-gray);color:var(--text-2);padding:2px 6px;border-radius:5px;flex:none;}
+.pw-gnote{font-size:9px;color:var(--text-3);margin-top:6px;}
 
 div[data-baseweb="tab-list"]{gap:6px;border-bottom:none !important;}
 button[data-baseweb="tab"]{background:var(--chip-gray);border-radius:999px;padding:5px 15px !important;font-family:'Sora';font-weight:600;color:var(--text-2);min-height:0;}
@@ -139,6 +169,8 @@ if 'inp' not in st.session_state:
     st.session_state.inp = dict(SAMPLE_VALUES)
 if 'p_throws' not in st.session_state:
     st.session_state.p_throws = 'R'
+if 'history' not in st.session_state:
+    st.session_state.history = []          # 이번 세션에서 예측해 본 (ax, az) 이력
 if 'label' not in st.session_state:
     st.session_state.label = None
     st.session_state.conf = None
@@ -150,23 +182,43 @@ if 'warmed_up' not in st.session_state:
     st.session_state.warmed_up = False
 
 
+@st.cache_data(show_spinner=False)
+def _predict_cached(items, p_throws):
+    """동일 입력이면 모델 추론·설명 생성을 다시 하지 않도록 결과를 캐시한다.
+
+    슬라이더 값이 안 바뀐 rerun(탭 전환, 필터 클릭 등)에서는 즉시 반환된다.
+    반환 튜플 끝에 최초 계산 시 측정한 추론 시간(ms)을 함께 담는다.
+    """
+    t0 = time.perf_counter()
+    label, conf, proba, attribution, explanation = predict(dict(items), p_throws)
+    return label, conf, proba, attribution, explanation, (time.perf_counter() - t0) * 1000
+
+
 def run_prediction(inp):
-    """백엔드 예측을 호출하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다."""
+    """예측을 실행(캐시 경유)하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다."""
     spinner_msg = (
         "예측 중입니다..." if st.session_state.warmed_up
         else "예측 중입니다... (첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요)"
     )
     try:
         with st.spinner(spinner_msg):
-            t0 = time.perf_counter()
-            label, conf, proba, attribution, explanation = predict(inp, st.session_state.p_throws)
-            st.session_state.inf_ms = (time.perf_counter() - t0) * 1000
+            key = tuple(sorted(inp.items()))
+            label, conf, proba, attribution, explanation, inf_ms = _predict_cached(
+                key, st.session_state.p_throws
+            )
         st.session_state.label = label
         st.session_state.conf = conf
         st.session_state.proba = proba
         st.session_state.attribution = attribution
         st.session_state.explanation = explanation
+        st.session_state.inf_ms = inf_ms
         st.session_state.warmed_up = True
+
+        hist = st.session_state.history
+        pt = (float(inp['ax']), float(inp['az']))
+        if not hist or hist[-1] != pt:
+            hist.append(pt)
+            del hist[:-40]                  # 최근 40개만 유지
     except Exception as e:
         st.error(f"예측에 실패했습니다: {e}")
 
@@ -283,36 +335,33 @@ LOGO_HTML = """
 </div>
 """
 
-PITCH_ORDER = ['FF', 'SI', 'SL', 'CU', 'CH', 'FC', 'FS']
 
-GUIDE_ROWS = [
-    ('FF', '포심패스트볼', '93+ · az↑ · ax~0'),
-    ('SI', '싱커', '92+ · az↓살짝 · ax+'),
-    ('SL', '슬라이더', '82-88 · az0/− · ax++'),
-    ('CU', '커브', '75-82 · az−− · ax−'),
-    ('CH', '체인지업', '80-87 · az− · ax+'),
-    ('FC', '커터', '88-94 · az~0 · ax−'),
-    ('FS', '스플리터', '83-90 · az−−− · ax~0'),
-]
+def _flip_ax(hint):
+    """ax 힌트의 +/− 를 서로 뒤집는다 (좌완 표시용)."""
+    return hint.replace('+', '\x00').replace('−', '+').replace('\x00', '−')
 
 
-def render_guide():
-    rows = "".join(
-        f'<div class="pw-grow"><span class="pw-gcode">{code}</span>'
-        f'<span>{name} · {rule}</span></div>'
-        for code, name, rule in GUIDE_ROWS
-    )
+def render_guide(p_throws):
+    is_left = p_throws == 'L'
+    rows = ""
+    for code, name, spd, az_hint, ax_hint in GUIDE_ROWS:
+        ax_disp = _flip_ax(ax_hint) if is_left else ax_hint
+        rows += (
+            f'<div class="pw-grow"><span class="pw-gcode">{code}</span>'
+            f'<span>{name} · {spd} · {az_hint} · ax{ax_disp}</span></div>'
+        )
+    side = "좌완" if is_left else "우완"
+    other = "우완" if is_left else "좌완"
     st.markdown(
-        rows + '<div class="pw-gnote">※ ax 방향은 우완 기준 · 좌완은 좌우 반대</div>',
+        rows + f'<div class="pw-gnote">※ ax 방향은 {side} 기준 · {other}은 좌우 반대</div>',
         unsafe_allow_html=True,
     )
 
 
 def render_summary(label, conf, inf_ms):
-    dot = PITCH_COLORS.get(label, ACCENT_HEX)
     st.markdown(
         '<div class="pw-summary">'
-        f'<span class="pw-sum-pred"><i style="background:{dot}"></i>{PITCH_NAMES.get(label, label)}</span>'
+        f'<span class="pw-sum-pred"><i></i>{PITCH_NAMES.get(label, label)}</span>'
         f'<span class="pw-sum-chip">신뢰도 {conf * 100:.0f}%</span>'
         '<span class="pw-sum-chip">모델 정확도 94.2%</span>'
         f'<span class="pw-sum-chip">추론 시간 {inf_ms:.0f}ms</span>'
@@ -321,18 +370,19 @@ def render_summary(label, conf, inf_ms):
     )
 
 
-def render_prob_dist(proba):
+def render_prob_dist(proba, label):
     st.markdown('<div class="pw-label">구종별 확률 분포</div>', unsafe_allow_html=True)
     rows = ""
     for k in PITCH_ORDER:
         if k not in proba:
             continue
         v = proba[k] * 100
+        color = ACCENT_HEX if k == label else GRAY
         rows += (
             '<div class="pw-bar-row">'
             f'<span class="pw-bar-name">{PITCH_NAMES[k]}</span>'
             '<span class="pw-bar-track">'
-            f'<span class="pw-bar-fill" style="width:{v:.1f}%;background:{PITCH_COLORS[k]}"></span>'
+            f'<span class="pw-bar-fill" style="width:{v:.1f}%;background:{color}"></span>'
             '</span>'
             f'<span class="pw-bar-pct">{v:.0f}%</span>'
             '</div>'
@@ -340,37 +390,60 @@ def render_prob_dist(proba):
     st.markdown(rows, unsafe_allow_html=True)
 
 
-def render_movement(inp, label):
-    """현재 투구의 수평·수직 변화량(pfx, inch)을 무브먼트 평면 위 링 마커로 표시한다."""
-    hx = PITCH_COLORS.get(label, ACCENT_HEX) if label else ACCENT_HEX
-    x, y = inp['pfx_x'] * 12, inp['pfx_z'] * 12
+@st.cache_data(show_spinner=False)
+def movement_reference(p_throws):
+    """가이드 범위(REF_RANGES)에서 구종별 배경 포인트를 생성한다. p_throws별로 1회만 계산."""
+    rng = np.random.default_rng(42)
+    mirror = -1.0 if p_throws == 'L' else 1.0
+    xs, ys = [], []
+    for axlo, axhi, azlo, azhi in REF_RANGES.values():
+        xs.extend(rng.uniform(axlo, axhi, 18) * mirror)
+        ys.extend(rng.uniform(azlo, azhi, 18))
+    return xs, ys
+
+
+def render_movement(inp, label, p_throws):
+    """수평(ax)·수직(az) 무브먼트 평면. 회색 배경 분포 + 세션 이력 위에 현재 투구를 빨간 링으로."""
+    st.markdown('<div class="pw-label">궤적 · 무브먼트 차트</div>', unsafe_allow_html=True)
+    ref_x, ref_y = movement_reference(p_throws)
+    mirror = -1.0 if p_throws == 'L' else 1.0
+
     fig = go.Figure()
     fig.add_hline(y=0, line_color=GRID)
     fig.add_vline(x=0, line_color=GRID)
-    fig.add_trace(go.Scatter(
-        x=[x], y=[y], mode='markers',
-        marker=dict(size=22, color='rgba(0,0,0,0)', line=dict(color=hx, width=3)),
-    ))
-    fig.add_trace(go.Scatter(x=[x], y=[y], mode='markers', marker=dict(size=7, color=hx)))
+    fig.add_trace(go.Scatter(x=ref_x, y=ref_y, mode='markers',
+                             marker=dict(size=6, color=GRAY_SOFT), hoverinfo='skip'))
+
+    hist = st.session_state.history
+    if len(hist) > 1:
+        fig.add_trace(go.Scatter(
+            x=[h[0] for h in hist[:-1]], y=[h[1] for h in hist[:-1]], mode='markers',
+            marker=dict(size=7, color=GRAY_TRAIL), hoverinfo='skip',
+        ))
+
+    fig.add_trace(go.Scatter(x=[inp['ax']], y=[inp['az']], mode='markers',
+                             marker=dict(size=22, color='rgba(0,0,0,0)',
+                                         line=dict(color=ACCENT_HEX, width=3))))
+    fig.add_trace(go.Scatter(x=[inp['ax']], y=[inp['az']], mode='markers',
+                             marker=dict(size=7, color=ACCENT_HEX)))
+
+    ann = [
+        dict(x=(lo + hi) / 2 * mirror, y=(zlo + zhi) / 2, text=PITCH_NAMES[c],
+             showarrow=False, font=dict(size=9, color="rgba(138,143,152,0.75)"))
+        for c, (lo, hi, zlo, zhi) in REF_RANGES.items()
+    ]
     fig.update_layout(
-        height=300, margin=dict(l=44, r=20, t=10, b=38),
+        height=320, margin=dict(l=44, r=20, t=10, b=38),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='수평 변화량 (in)', range=[-24, 24], gridcolor=GRID, zeroline=False),
-        yaxis=dict(title='수직 변화량 (in)', range=[-24, 24], gridcolor=GRID, zeroline=False),
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False, annotations=ann,
+        xaxis=dict(title='수평 무브먼트 (ax)', range=[-30, 30], gridcolor=GRID, zeroline=False),
+        yaxis=dict(title='수직 무브먼트 (az)', range=[-50, 15], gridcolor=GRID, zeroline=False),
     )
-    st.markdown('<div class="pw-label">궤적 · 무브먼트 차트</div>', unsafe_allow_html=True)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    legend = "".join(
-        f'<span class="pw-leg"><i style="background:{PITCH_COLORS[k]}"></i>{PITCH_NAMES[k]}</span>'
-        for k in PITCH_ORDER
-    )
-    st.markdown(f'<div class="pw-legend">{legend}</div>', unsafe_allow_html=True)
 
 
 def render_trajectory(inp, p_throws, label):
-    """측면뷰·상단뷰 궤적과 스트라이크존을 라이트 테마로 그린다."""
-    color = PITCH_COLORS.get(label, ACCENT_HEX) if label else ACCENT_HEX
+    """측면뷰·상단뷰 궤적과 평균 스트라이크존을 라이트 테마로 그린다."""
     c1, c2 = st.columns([1.3, 1])
 
     with c1:
@@ -380,9 +453,9 @@ def render_trajectory(inp, p_throws, label):
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
-                                 line=dict(color=color, width=3)))
+                                 line=dict(color=ACCENT_HEX, width=3)))
         fig.add_trace(go.Scatter(x=[side_x[0]], y=[side_z[0]], mode='markers',
-                                 marker=dict(color=color, size=8)))
+                                 marker=dict(color=ACCENT_HEX, size=8)))
         fig.update_layout(
             height=250, margin=dict(l=40, r=10, t=10, b=30),
             plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
@@ -393,9 +466,9 @@ def render_trajectory(inp, p_throws, label):
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
         fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=top_y, y=top_x, mode='lines', line=dict(color=color, width=3)))
+        fig2.add_trace(go.Scatter(x=top_y, y=top_x, mode='lines', line=dict(color=ACCENT_HEX, width=3)))
         fig2.add_trace(go.Scatter(x=[top_y[0]], y=[top_x[0]], mode='markers',
-                                  marker=dict(color=color, size=8)))
+                                  marker=dict(color=ACCENT_HEX, size=8)))
         fig2.add_hline(y=0, line_dash='dash', line_color=GRID)
         fig2.update_layout(
             height=200, margin=dict(l=40, r=10, t=10, b=30),
@@ -409,11 +482,13 @@ def render_trajectory(inp, p_throws, label):
     with c2:
         st.markdown('<div class="pw-label">스트라이크존</div>', unsafe_allow_html=True)
         fig3 = go.Figure()
-        fig3.add_shape(type="rect", x0=-0.708, x1=0.708, y0=1.5, y1=3.5,
-                       line=dict(color="#c9ccd2", width=2), fillcolor="rgba(197,54,55,0.06)")
+        # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
+        fig3.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5,
+                       line=dict(color=ZONE_LINE, width=2),
+                       fillcolor="rgba(138,143,152,0.06)", layer="below")
         fig3.add_trace(go.Scatter(
             x=[inp['plate_x']], y=[inp['plate_z']], mode='markers',
-            marker=dict(color=color, size=18, line=dict(color='white', width=1)),
+            marker=dict(color=ACCENT_HEX, size=18, line=dict(color='white', width=1)),
         ))
         fig3.update_layout(
             height=470, margin=dict(l=40, r=10, t=10, b=30),
@@ -440,7 +515,7 @@ def render_model_info():
 
 
 def render_pitch_mix(df):
-    """최근 투구의 구종별 사용 비율을 가로 막대 차트로 보여준다."""
+    """최근 투구의 구종별 사용 비율을 가로 막대 차트로 보여준다 (단색 회색)."""
     if 'pitch_type' not in df.columns:
         return
     counts = df['pitch_type'].dropna()
@@ -451,7 +526,7 @@ def render_pitch_mix(df):
     ratio = (counts.value_counts(normalize=True) * 100).sort_values()
     fig = go.Figure(go.Bar(
         x=ratio.values, y=[PITCH_NAMES.get(k, k) for k in ratio.index], orientation='h',
-        marker_color=[PITCH_COLORS.get(k, NEUTRAL_HEX) for k in ratio.index],
+        marker_color=GRAY,
         text=[f'{v:.0f}%' for v in ratio.values], textposition='outside',
     ))
     fig.update_layout(
@@ -466,10 +541,10 @@ def render_pitch_mix(df):
 
 
 def _waterfall_contribs(attribution, conf):
-    """gradient×input 기여도를 base→예측 확률 구간에 맞춰 정규화한다.
+    """gradient×input 기여도를 base→예측 확률 구간에 맞춰 선형 정규화한다.
 
-    base(균등 사전확률) + Σ기여도 = 예측 확률 이 정확히 성립하도록 선형 스케일한다.
-    부호와 피처 간 상대 크기는 원본 gradient×input 그대로 유지된다.
+    base(균등 사전확률) + Σ기여도 = 예측 확률 이 정확히 성립한다. 부호와
+    피처 간 상대 크기는 원본 gradient×input 그대로 유지된다.
     """
     base = 1.0 / len(PITCH_NAMES)
     total = conf - base
@@ -482,15 +557,15 @@ def _waterfall_contribs(attribution, conf):
     return base, contribs
 
 
-def render_waterfall(base, ordered, pred):
+def render_waterfall(base, ordered):
     """기준값 → 피처 기여도 누적 → 예측값을 가로 스택 바 하나로 그린다."""
     top = ordered[:6]
     rest = sum(c for _, c in ordered[6:])
-    segs = [("기준값", base, "#e9ebef")]
+    segs = [("기준값", base, "#dfe1e4")]
     for f, c in top:
-        segs.append((FEAT_KR.get(f, f), c, ACCENT_HEX if c >= 0 else NEUTRAL_HEX))
+        segs.append((FEAT_KR.get(f, f), c, ACCENT_HEX if c >= 0 else GRAY))
     if abs(rest) > 1e-6:
-        segs.append(("기타", rest, ACCENT_HEX if rest >= 0 else NEUTRAL_HEX))
+        segs.append(("기타", rest, ACCENT_HEX if rest >= 0 else GRAY))
 
     fig = go.Figure()
     cursor = 0.0
@@ -531,7 +606,7 @@ def render_feature_card(f, c, mx, label):
         f'<span class="pw-fbadge {"pos" if pos else "neg"}">{c:+.2f}</span>'
         '</div>'
         f'<div class="pw-fmag"><span style="width:{width:.0f}%;'
-        f'background:{ACCENT_HEX if pos else NEUTRAL_HEX}"></span></div>'
+        f'background:{ACCENT_HEX if pos else GRAY}"></span></div>'
         f'<p class="pw-fdesc">{sent}</p>'
         '</div>',
         unsafe_allow_html=True,
@@ -549,7 +624,7 @@ def render_shap_panel(attribution, conf, label, explanation):
         unsafe_allow_html=True,
     )
     if not attribution or not conf or not label:
-        st.info("사이드바에서 **예측 실행**을 누르면 기여도가 표시됩니다.")
+        st.info("사이드바에서 값을 조절하면 기여도가 표시됩니다.")
         return
 
     if explanation:
@@ -558,7 +633,7 @@ def render_shap_panel(attribution, conf, label, explanation):
     base, contribs = _waterfall_contribs(attribution, conf)
     ordered = sorted(contribs.items(), key=lambda kv: abs(kv[1]), reverse=True)
 
-    render_waterfall(base, ordered, conf)
+    render_waterfall(base, ordered)
     st.markdown(
         f'<div class="pw-wf-ends"><span>기준값 {base:.2f}</span>'
         f'<span>예측값 {conf:.2f}</span></div>',
@@ -626,7 +701,7 @@ with st.sidebar:
             'plate_x': round(float(np.clip(rx + vx0*t + 0.5*ax_*t**2, -2, 2)), 3),
         })
         st.session_state.inp = inp
-        run_prediction(inp)
+        run_prediction(inp)   # 위젯 변경 시 Streamlit이 자동 rerun → 여기서 즉시 재예측
 
     else:
         with st.expander("CSV로 실제 투구 업로드"):
@@ -688,20 +763,22 @@ with st.sidebar:
         help=None if input_mode == "직접 조작" else "실제 투구 데이터에서 자동으로 반영됩니다.",
     )
 
-    st.markdown("---")
-    with st.expander("구종별 만들기 가이드"):
-        render_guide()
+    if input_mode == "직접 조작":
+        st.markdown("---")
+        with st.expander("구종별 만들기 가이드"):
+            render_guide(st.session_state.p_throws)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("예측 실행"):
-        run_prediction(st.session_state.inp)
-
-# ── 메인: 대시보드 + SHAP 패널 ──────────────────────────
+# ── 메인: 요약 스트립 + 대시보드 + SHAP 패널 ────────────
 inp = st.session_state.inp
 label, conf, proba = st.session_state.label, st.session_state.conf, st.session_state.proba
 attribution = st.session_state.attribution
 explanation = st.session_state.explanation
 inf_ms = st.session_state.get('inf_ms', 0.0)
+
+# 요약 줄은 탭 바깥 · 항상 보이게
+if label:
+    with st.container(border=True):
+        render_summary(label, conf, inf_ms)
 
 left, right = st.columns([2.2, 1], gap="large")
 
@@ -711,13 +788,11 @@ with left:
     with tab_dash:
         if label and proba:
             with st.container(border=True):
-                render_summary(label, conf, inf_ms)
+                render_prob_dist(proba, label)
             with st.container(border=True):
-                render_prob_dist(proba)
-            with st.container(border=True):
-                render_movement(inp, label)
+                render_movement(inp, label, st.session_state.p_throws)
         else:
-            st.info("사이드바에서 값을 조절하고 **예측 실행**을 눌러보세요.")
+            st.info("사이드바에서 값을 조절해 예측을 실행하세요.")
 
     with tab_traj:
         with st.container(border=True):
