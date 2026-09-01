@@ -64,11 +64,16 @@ def compute_trajectory_side(inp, n=50):
 
 
 def compute_trajectory_top(inp, p_throws='R', n=50):
-    """상단뷰 궤적(거리, 좌우) 좌표 배열을 계산한다. ax 부호는 포수 시점 기준이라 반전한다."""
+    """상단뷰 궤적(거리, 좌우) 좌표 배열을 계산한다.
+
+    좌우 성분은 app.py 사이드바가 plate_x를 만들 때 쓰는 식과 동일하게 맞춘다
+    (vx0 = 0.20*ax, 부호 반전 없음). 그래야 궤적 끝점이 로케이션·스트라이크존
+    차트의 빨간 점(plate_x)과 일치한다.
+    """
     vy0, ax_, rx = inp['vy0'], inp['ax'], inp['release_pos_x']
     ext = inp['release_extension']
     dist = PITCH_DIST - ext
     t = np.linspace(0, dist / max(abs(vy0), 1), n)
-    x_pos = rx + 0.5 * (-ax_) * t ** 2
+    x_pos = rx + 0.20 * ax_ * t + 0.5 * ax_ * t ** 2
     y_pos = ext + abs(vy0) * t
     return y_pos, x_pos
