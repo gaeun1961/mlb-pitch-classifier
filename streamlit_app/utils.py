@@ -27,9 +27,10 @@ PITCH_NAMES = {
     'CU': '커브',          'CH': '체인지업', 'FC': '커터', 'FS': '스플리터',
 }
 
+# 라이트 테마 "Pitch Workbench" 카테고리 팔레트 (oklch → sRGB hex, plotly용)
 PITCH_COLORS = {
-    'FF': '#C8443C', 'SI': '#E8843C', 'SL': '#8B5FBF',
-    'CU': '#3D7DC9', 'CH': '#2D9D6F', 'FC': '#D9622B', 'FS': '#3FB8C4',
+    'FF': '#3383ad', 'SI': '#279ea4', 'SL': '#c53637',
+    'CU': '#686bb9', 'CH': '#539156', 'FC': '#a172ac', 'FS': '#496b96',
 }
 
 PITCH_DIST = 60.5
