@@ -460,22 +460,15 @@ def render_movement(inp):
 
 
 def render_strikezone(inp, p_throws):
-    """정면(포수) 시점: 흐린 궤적이 존 안 어디로 들어오는지 + 플레이트 통과 지점."""
+    """정면(포수) 시점: 공이 존 대비 어디로 들어왔는지."""
     st.markdown('<div class="pw-label">로케이션 · 스트라이크존</div>', unsafe_allow_html=True)
-    # 정면뷰 궤적 = 같은 시간축으로 뽑은 (좌우, 높이). 두 배열 모두 길이 50, 인덱스로 정렬됨.
-    _, front_lr = compute_trajectory_top(inp, p_throws)
-    _, front_h = compute_trajectory_side(inp)
-
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
     fig.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5,
                   line=dict(color=ZONE_LINE, width=2),
                   fillcolor="rgba(138,143,152,0.06)", layer="below")
-    fig.add_trace(go.Scatter(x=front_lr, y=front_h, mode='lines',
-                             line=dict(color="rgba(120,124,133,0.35)", width=6),
-                             hoverinfo='skip'))
     fig.add_trace(go.Scatter(
-        x=[front_lr[-1]], y=[front_h[-1]], mode='markers',
+        x=[inp['plate_x']], y=[inp['plate_z']], mode='markers',
         marker=dict(color=ACCENT_HEX, size=20, line=dict(color='white', width=1.5)),
     ))
     fig.update_layout(
@@ -487,7 +480,7 @@ def render_strikezone(inp, p_throws):
         yaxis=dict(title='높이 (ft)', range=[0, 5], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    st.caption("회색 사각형 = 평균 스트라이크존 · 흐린 선 = 정면뷰 궤적 · 빨간 점 = 플레이트 통과 위치")
+    st.caption("회색 사각형 = 평균 스트라이크존 · 빨간 점 = 이 투구의 플레이트 통과 위치")
 
 
 def render_paths(inp, p_throws):
