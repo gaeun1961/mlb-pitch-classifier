@@ -174,6 +174,57 @@ if 'label' not in st.session_state:
 if 'warmed_up' not in st.session_state:
     st.session_state.warmed_up = False
 
+# ax/az 슬라이더는 key 기반(클릭으로도 값이 바뀔 수 있어서). 최초 1회만 시드.
+st.session_state.setdefault("ax_slider", float(SAMPLE_VALUES['ax']))
+st.session_state.setdefault("az_slider", float(SAMPLE_VALUES['az']))
+
+
+def _snap(v, lo, hi, step=0.5):
+    return float(np.clip(round(v / step) * step, lo, hi))
+
+
+def _apply_zone_click():
+    """스트라이크존 클릭 좌표를 입력에 반영한다.
+
+    - 좌우(px): 사이드바 plate_x 식(vx0 = 0.20·ax)을 뒤집어 ax 슬라이더를 맞춘다.
+    - 높이(pz): plate_z는 az에 거의 둔감해서(계수가 작다) az 대신 vz0을 직접 풀어
+      맞춘다. `_click_vz0`/`_click_ctx`로 넘겨서, 클릭 이후 슬라이더를 건드리기
+      전까지만 이 vz0을 쓰고 그 뒤엔 일반 식으로 돌아간다.
+    구속·회전수·익스텐션은 사용자가 맞춘 값을 그대로 둔다.
+    """
+    sel = st.session_state.get("zone_click")
+    if not sel:
+        return
+    try:
+        pts = sel["selection"]["points"]
+    except (TypeError, KeyError):
+        pts = getattr(getattr(sel, "selection", None), "points", None) or []
+    if not pts:
+        return
+    px, pz = float(pts[-1]["x"]), float(pts[-1]["y"])
+    sig = (round(px, 2), round(pz, 2))
+    if st.session_state.get("_zone_sig") == sig:
+        return
+    st.session_state["_zone_sig"] = sig
+
+    spd = round(float(st.session_state.inp['release_speed']), 2)
+    ext = round(float(st.session_state.inp['release_extension']), 2)
+    rz = SAMPLE_VALUES['release_pos_z']
+    base_rx = abs(SAMPLE_VALUES['release_pos_x'])
+    rx = base_rx if st.session_state.p_throws == 'L' else -base_rx
+    t = (PITCH_DIST - ext) / max(spd * 1.467, 1)
+
+    ax = _snap((px - rx) / (0.2 * t + 0.5 * t * t), -30.0, 30.0)
+    az = st.session_state["az_slider"]
+    vz0 = _snap((pz - rz - 0.5 * az * t * t) / t, -14.0, 3.0, step=0.01)
+
+    st.session_state["ax_slider"] = ax
+    st.session_state["_click_vz0"] = vz0
+    st.session_state["_click_ctx"] = (ax, az, spd, ext)
+
+
+_apply_zone_click()
+
 
 @st.cache_data(show_spinner=False)
 def _predict_cached(items, p_throws):
@@ -459,28 +510,40 @@ def render_movement(inp):
     st.caption(f"빨간 링 = 현재 예측 투구 · {ctx}. ax·az는 모델이 쓰는 17개 피처 중 2개입니다.")
 
 
-def render_strikezone(inp, p_throws):
-    """정면(포수) 시점: 공이 존 대비 어디로 들어왔는지."""
+def render_strikezone(inp, clickable=False):
+    """정면(포수) 시점 로케이션. clickable이면 존을 클릭해 공 위치를 지정할 수 있다."""
     st.markdown('<div class="pw-label">로케이션 · 스트라이크존</div>', unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
     fig.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5,
                   line=dict(color=ZONE_LINE, width=2),
                   fillcolor="rgba(138,143,152,0.06)", layer="below")
+    if clickable:
+        # 투명 격자 = 클릭 히트타깃. 클릭하면 가장 가까운 격자점(≈0.1ft)이 선택된다.
+        gx, gy = np.meshgrid(np.arange(-1.6, 1.61, 0.1), np.arange(0.3, 4.71, 0.1))
+        fig.add_trace(go.Scatter(x=gx.ravel(), y=gy.ravel(), mode='markers',
+                                 marker=dict(size=13, color='rgba(0,0,0,0)'), hoverinfo='skip'))
     fig.add_trace(go.Scatter(
         x=[inp['plate_x']], y=[inp['plate_z']], mode='markers',
         marker=dict(color=ACCENT_HEX, size=20, line=dict(color='white', width=1.5)),
+        hoverinfo='skip',
     ))
     fig.update_layout(
         height=340, margin=dict(l=40, r=10, t=10, b=32),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False, dragmode=False,
         xaxis=dict(title='좌우 (ft)', range=[-2, 2], gridcolor=GRID, zeroline=False,
-                   scaleanchor='y'),
-        yaxis=dict(title='높이 (ft)', range=[0, 5], gridcolor=GRID, zeroline=False),
+                   scaleanchor='y', fixedrange=True),
+        yaxis=dict(title='높이 (ft)', range=[0, 5], gridcolor=GRID, zeroline=False,
+                   fixedrange=True),
     )
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    st.caption("회색 사각형 = 평균 스트라이크존 · 빨간 점 = 이 투구의 플레이트 통과 위치")
+    if clickable:
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False},
+                        on_select="rerun", selection_mode="points", key="zone_click")
+        st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지")
+    else:
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.caption("회색 사각형 = 평균 스트라이크존 · 빨간 점 = 이 투구의 플레이트 통과 위치")
 
 
 def render_paths(inp, p_throws):
@@ -684,17 +747,24 @@ with st.sidebar:
         "입력 방식", ["직접 조작", "투수 검색"],
         horizontal=True, label_visibility="collapsed",
     )
+    _mode_changed = st.session_state.get("_prev_mode") != input_mode
+    st.session_state["_prev_mode"] = input_mode
     st.markdown("---")
 
     if input_mode == "직접 조작":
+        # 다른 모드에서 막 넘어왔으면 ax/az 슬라이더를 현재 입력값으로 동기화
+        if _mode_changed:
+            st.session_state["ax_slider"] = _snap(st.session_state.inp['ax'], -30.0, 30.0)
+            st.session_state["az_slider"] = _snap(st.session_state.inp['az'], -50.0, 15.0)
+
         spd = st.slider("구속 (mph)", 60.0, 105.0, float(st.session_state.inp['release_speed']),
                         0.5, help="빠를수록 FF/FC 계열")
         spin = st.slider("스핀레이트 (rpm)", 1500.0, 3500.0,
                          float(st.session_state.inp['release_spin_rate']), 10.0,
                          help="높을수록 포심/커터 계열")
-        ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, float(st.session_state.inp['ax']), 0.5,
-                        help="좌완/우완에 따라 휘는 방향이 반대로 표시됩니다")
-        az = st.slider("수직 무브먼트 (az)", -50.0, 15.0, float(st.session_state.inp['az']), 0.5,
+        ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, key="ax_slider",
+                        help="스트라이크존을 클릭하면 이 값이 자동으로 맞춰집니다")
+        az = st.slider("수직 무브먼트 (az)", -50.0, 15.0, step=0.5, key="az_slider",
                        help="양수=포심(떠오름), 음수=싱커(가라앉음)")
         ext = st.slider("릴리스 익스텐션 (ft)", 5.0, 7.5,
                         float(st.session_state.inp['release_extension']), 0.1,
@@ -704,6 +774,9 @@ with st.sidebar:
         rx = base_rx if st.session_state.p_throws == 'L' else -base_rx
 
         vz0 = round(-3.0 - 0.15 * az, 2)
+        # 존 클릭 직후(슬라이더 미조작)면 클릭 높이를 맞춘 vz0을 사용
+        if st.session_state.get("_click_ctx") == (ax_, az, round(spd, 2), round(ext, 2)):
+            vz0 = st.session_state["_click_vz0"]
         vx0 = round(0.20 * ax_, 2)
         rz = SAMPLE_VALUES['release_pos_z']
 
@@ -866,7 +939,7 @@ with left:
             with st.container(border=True):
                 render_prob_dist(proba, label)
             with st.container(border=True):
-                render_strikezone(inp, st.session_state.p_throws)
+                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
             # 무브먼트 산점도는 실제 데이터를 불러온 경우에만 (실제 분포가 있어 의미 있음)
             if st.session_state.get('movement_bg'):
                 with st.container(border=True):
