@@ -2,7 +2,7 @@
 
 import re
 import time
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -272,7 +272,9 @@ def search_pitchers(query):
 
     candidates = []
     for p in resp.json().get("people", []):
-        if p.get("primaryPosition", {}).get("abbreviation") != "P":
+        # "P" = 투수, "TWP" = 투타겸업(예: 오타니 쇼헤이) — 포지션을 완전히 바꾼
+        # 선수라도 이 두 포지션 이력이 있으면 과거 투구 기록이 있을 수 있다.
+        if p.get("primaryPosition", {}).get("abbreviation") not in ("P", "TWP"):
             continue
         debut = p.get("mlbDebutDate")
         if not debut:
@@ -283,7 +285,9 @@ def search_pitchers(query):
             "name": p["fullName"],
             "team": p.get("currentTeam", {}).get("name", "소속팀 미상"),
             "debut_year": debut[:4],
+            "debut_date": debut[:10],
             "last_year": last_played[:4] if last_played else None,
+            "last_played_date": last_played[:10] if last_played else None,
             "active": p.get("active", False),
             "throws": p.get("pitchHand", {}).get("code", "R"),
         })
@@ -293,6 +297,9 @@ def search_pitchers(query):
 
 
 STATCAST_START_YEAR = 2015
+STATCAST_START_DATE = date(STATCAST_START_YEAR, 1, 1)
+MAX_DATE_ONLY_DAYS = 5      # 이름 없이 날짜만으로 검색할 때 허용하는 최대 기간(리그 전체 조회라 무거움)
+MAX_DATE_ONLY_ROWS = 500    # 날짜만 검색 시 화면에 표시할 최대 투구 수
 
 
 def career_label(c):
@@ -303,15 +310,26 @@ def career_label(c):
     return f"{c['name']} ({c['debut_year']}~{end}, 은퇴)"
 
 
-def available_seasons(c):
-    """Statcast가 제공되는 2015년 이후 범위로 제한한 이 투수의 조회 가능 시즌 목록(최신순)."""
-    this_year = date.today().year
-    start = max(int(c["debut_year"]), STATCAST_START_YEAR)
-    end = this_year if c["active"] else int(c["last_year"] or c["debut_year"])
-    end = min(end, this_year)
-    if start > end:
-        return []
-    return list(range(end, start - 1, -1))
+def pitcher_date_bounds(c):
+    """이 투수의 Statcast 조회 가능 날짜 범위(최소·최대)와 기본 조회 범위(최근 시즌)를 반환한다.
+
+    Statcast 시작일(2015-01-01) 이전에 은퇴한 선수는 None을 반환한다.
+    """
+    debut = date.fromisoformat(c["debut_date"])
+    today = date.today()
+    min_d = max(debut, STATCAST_START_DATE)
+
+    if c["active"]:
+        max_d = today
+    else:
+        last = c["last_played_date"]
+        max_d = min(date.fromisoformat(last) if last else debut, today)
+
+    if min_d > max_d:
+        return None
+
+    def_start = max(date(max_d.year, 1, 1), min_d)
+    return min_d, max_d, def_start, max_d
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -320,6 +338,14 @@ def fetch_pitcher_statcast(player_id, start_dt, end_dt):
     from pybaseball import statcast_pitcher
 
     return statcast_pitcher(start_dt, end_dt, player_id)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_statcast_range(start_dt, end_dt):
+    """투수 이름 없이 날짜 범위만으로 리그 전체 Statcast 투구 데이터를 가져온다."""
+    from pybaseball import statcast
+
+    return statcast(start_dt, end_dt)
 
 
 # ── 렌더 헬퍼 ────────────────────────────────────────────
@@ -712,9 +738,13 @@ with st.sidebar:
 
         st.caption(
             f"Statcast 데이터는 {STATCAST_START_YEAR}년부터 제공됩니다. "
-            f"{STATCAST_START_YEAR}년 이전 활동 선수는 그 이후 시즌 기록만 조회할 수 있어요."
+            f"{STATCAST_START_YEAR}년 이전 활동 선수는 그 이후 시즌 기록만 조회할 수 있어요. "
+            "이름을 비워두면 날짜만으로도 검색할 수 있습니다."
         )
-        query = st.text_input("투수 이름 (2글자 이상, 영어)", placeholder="Gerrit Cole").strip()
+        query = st.text_input(
+            "투수 이름 (2글자 이상, 영어 · 비워두면 날짜로만 검색)",
+            placeholder="Gerrit Cole",
+        ).strip()
 
         if query and contains_korean(query):
             st.warning("영어로 입력해주세요 (예: Gerrit Cole).")
@@ -734,24 +764,69 @@ with st.sidebar:
                 chosen = options[choice]
                 st.session_state.p_throws = chosen['throws']
 
-                seasons = available_seasons(chosen)
-                if not seasons:
+                bounds = pitcher_date_bounds(chosen)
+                if bounds is None:
                     st.warning(
                         f"{chosen['name']} 선수는 Statcast 데이터 제공({STATCAST_START_YEAR}년) "
                         "이전에 활동을 마쳐 투구 데이터를 조회할 수 없습니다."
                     )
                 else:
-                    season = st.selectbox("시즌 선택", options=seasons)
-                    with st.spinner(f"{chosen['name']} 선수의 {season}시즌 투구 데이터를 가져오는 중..."):
-                        df = fetch_pitcher_statcast(chosen['id'], f"{season}-01-01", f"{season}-12-31")
+                    min_d, max_d, def_start, def_end = bounds
+                    dc1, dc2 = st.columns(2)
+                    start_d = dc1.date_input("시작일", value=def_start,
+                                              min_value=min_d, max_value=max_d, key="pitcher_start")
+                    end_d = dc2.date_input("종료일", value=def_end,
+                                            min_value=min_d, max_value=max_d, key="pitcher_end")
 
-                    if df.empty:
-                        st.warning(f"{season}시즌 투구 기록이 없습니다.")
+                    if start_d > end_d:
+                        st.error("시작일이 종료일보다 늦을 수 없습니다.")
                     else:
-                        render_pitch_mix(df)
-                        select_and_predict_from_df(df)
+                        with st.spinner(
+                            f"{chosen['name']} 선수의 {start_d}~{end_d} 투구 데이터를 가져오는 중..."
+                        ):
+                            df = fetch_pitcher_statcast(chosen['id'], str(start_d), str(end_d))
+
+                        if df.empty:
+                            st.warning("해당 기간 투구 기록이 없습니다. "
+                                       "타자로만 뛴 기간일 수 있어요.")
+                        else:
+                            render_pitch_mix(df)
+                            select_and_predict_from_df(df)
         elif query:
             st.caption("2글자 이상 입력하면 검색됩니다.")
+        else:
+            st.markdown('<div class="pw-label">날짜로 검색</div>', unsafe_allow_html=True)
+            dc1, dc2 = st.columns(2)
+            default_end = date.today()
+            default_start = default_end - timedelta(days=1)
+            start_d = dc1.date_input("시작일", value=default_start,
+                                      min_value=STATCAST_START_DATE, max_value=default_end, key="range_start")
+            end_d = dc2.date_input("종료일", value=default_end,
+                                    min_value=STATCAST_START_DATE, max_value=default_end, key="range_end")
+
+            if start_d > end_d:
+                st.error("시작일이 종료일보다 늦을 수 없습니다.")
+            elif (end_d - start_d).days > MAX_DATE_ONLY_DAYS:
+                st.error(
+                    f"이름 없이 날짜만으로 검색할 때는 리그 전체 데이터를 불러오므로 "
+                    f"최대 {MAX_DATE_ONLY_DAYS}일 범위까지만 지원합니다. 범위를 좁혀주세요."
+                )
+            else:
+                with st.spinner(f"{start_d}~{end_d} 전체 투구 데이터를 가져오는 중..."):
+                    df = fetch_statcast_range(str(start_d), str(end_d))
+
+                if df.empty:
+                    st.warning("해당 기간에 투구 기록이 없습니다 (시즌 오프일 수 있습니다).")
+                else:
+                    total = len(df)
+                    if total > MAX_DATE_ONLY_ROWS:
+                        st.info(
+                            f"총 {total:,}건 중 {MAX_DATE_ONLY_ROWS}건만 표시합니다. "
+                            "날짜 범위를 좁히면 더 정확히 볼 수 있어요."
+                        )
+                        df = df.head(MAX_DATE_ONLY_ROWS)
+                    render_pitch_mix(df)
+                    select_and_predict_from_df(df)
 
     st.markdown("---")
     st.markdown('<div class="pw-label">투구 손</div>', unsafe_allow_html=True)
