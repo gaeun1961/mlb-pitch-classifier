@@ -459,71 +459,68 @@ def render_movement(inp):
     st.caption(f"빨간 링 = 현재 예측 투구 · {ctx}. ax·az는 모델이 쓰는 17개 피처 중 2개입니다.")
 
 
-def render_trajectory(inp, p_throws, label):
-    """측면뷰·상단뷰 궤적과 평균 스트라이크존을 라이트 테마로 그린다."""
-    c1, c2 = st.columns([1.3, 1])
+def render_strikezone(inp):
+    """포수 시점 로케이션: 공이 홈플레이트에서 존 대비 어디로 들어왔는지."""
+    st.markdown('<div class="pw-label">로케이션 · 스트라이크존</div>', unsafe_allow_html=True)
+    fig = go.Figure()
+    # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
+    fig.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5,
+                  line=dict(color=ZONE_LINE, width=2),
+                  fillcolor="rgba(138,143,152,0.06)", layer="below")
+    fig.add_trace(go.Scatter(
+        x=[inp['plate_x']], y=[inp['plate_z']], mode='markers',
+        marker=dict(color=ACCENT_HEX, size=20, line=dict(color='white', width=1.5)),
+    ))
+    fig.update_layout(
+        height=340, margin=dict(l=40, r=10, t=10, b=32),
+        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
+        xaxis=dict(title='좌우 (ft)', range=[-2, 2], gridcolor=GRID, zeroline=False,
+                   scaleanchor='y'),
+        yaxis=dict(title='높이 (ft)', range=[0, 5], gridcolor=GRID, zeroline=False),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    st.caption("회색 사각형 = 평균 스트라이크존 · 빨간 점 = 이 투구의 플레이트 통과 위치")
 
-    with c1:
-        st.markdown('<div class="pw-label">투구 궤적</div>', unsafe_allow_html=True)
-        side_x, side_z = compute_trajectory_side(inp)
-        top_y, top_x = compute_trajectory_top(inp, p_throws)
 
-        # 측면뷰: 홈플레이트에 스트라이크존 높이(1.5~3.5ft) 사각형 → 공이 존 위/아래로
-        # 어디쯤 지나갔는지 바로 보인다.
-        fig = go.Figure()
-        fig.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=1.5, y1=3.5,
-                      line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
-        fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
-                                 line=dict(color=ACCENT_HEX, width=3)))
-        fig.add_trace(go.Scatter(x=[side_x[0], side_x[-1]], y=[side_z[0], side_z[-1]],
-                                 mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
-        fig.update_layout(
-            height=250, margin=dict(l=40, r=10, t=10, b=30),
-            plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-            xaxis=dict(title='거리 (ft)', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
-            yaxis=dict(title='높이 (ft)', range=[0, 8], gridcolor=GRID, zeroline=False),
-        )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+def render_paths(inp, p_throws):
+    """측면뷰·상단뷰 궤적. 홈플레이트에 스트라이크존 박스로 존 대비 위치를 표시한다."""
+    st.markdown('<div class="pw-label">투구 궤적</div>', unsafe_allow_html=True)
+    side_x, side_z = compute_trajectory_side(inp)
+    top_y, top_x = compute_trajectory_top(inp, p_throws)
 
-        # 상단뷰: 홈플레이트에 존 폭(±0.83ft) 사각형
-        fig2 = go.Figure()
-        fig2.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=-0.83, y1=0.83,
-                       line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
-        fig2.add_trace(go.Scatter(x=top_y, y=top_x, mode='lines', line=dict(color=ACCENT_HEX, width=3)))
-        fig2.add_trace(go.Scatter(x=[top_y[0], top_y[-1]], y=[top_x[0], top_x[-1]],
-                                  mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
-        fig2.add_hline(y=0, line_dash='dash', line_color=GRID)
-        fig2.update_layout(
-            height=200, margin=dict(l=40, r=10, t=10, b=30),
-            plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-            xaxis=dict(title='거리 (ft)', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
-            yaxis=dict(title='좌우 (ft)', range=[-3, 3], gridcolor=GRID, zeroline=False),
-        )
-        st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
-        st.caption("회색 사각형 = 홈플레이트 스트라이크존 · 빨간 점 = 릴리스·플레이트 통과 지점")
+    fig = go.Figure()
+    fig.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=1.5, y1=3.5,
+                  line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
+    fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
+                             line=dict(color=ACCENT_HEX, width=3)))
+    fig.add_trace(go.Scatter(x=[side_x[0], side_x[-1]], y=[side_z[0], side_z[-1]],
+                             mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
+    fig.update_layout(
+        height=280, margin=dict(l=40, r=10, t=10, b=30),
+        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
+        xaxis=dict(title='거리 (ft) · 측면뷰', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
+        yaxis=dict(title='높이 (ft)', range=[0, 8], gridcolor=GRID, zeroline=False),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-    with c2:
-        st.markdown('<div class="pw-label">스트라이크존</div>', unsafe_allow_html=True)
-        fig3 = go.Figure()
-        # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
-        fig3.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5,
-                       line=dict(color=ZONE_LINE, width=2),
-                       fillcolor="rgba(138,143,152,0.06)", layer="below")
-        fig3.add_trace(go.Scatter(
-            x=[inp['plate_x']], y=[inp['plate_z']], mode='markers',
-            marker=dict(color=ACCENT_HEX, size=18, line=dict(color='white', width=1)),
-        ))
-        fig3.update_layout(
-            height=470, margin=dict(l=40, r=10, t=10, b=30),
-            plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-            xaxis=dict(title='좌우 (ft)', range=[-2, 2], gridcolor=GRID, zeroline=False,
-                       scaleanchor='y'),
-            yaxis=dict(title='높이 (ft)', range=[0, 5], gridcolor=GRID, zeroline=False),
-        )
-        st.plotly_chart(fig3, use_container_width=True, config={'displayModeBar': False})
+    fig2 = go.Figure()
+    fig2.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=-0.83, y1=0.83,
+                   line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
+    fig2.add_trace(go.Scatter(x=top_y, y=top_x, mode='lines', line=dict(color=ACCENT_HEX, width=3)))
+    fig2.add_trace(go.Scatter(x=[top_y[0], top_y[-1]], y=[top_x[0], top_x[-1]],
+                              mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
+    fig2.add_hline(y=0, line_dash='dash', line_color=GRID)
+    fig2.update_layout(
+        height=240, margin=dict(l=40, r=10, t=10, b=30),
+        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
+        xaxis=dict(title='거리 (ft) · 상단뷰', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
+        yaxis=dict(title='좌우 (ft)', range=[-3, 3], gridcolor=GRID, zeroline=False),
+    )
+    st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
+    st.caption("회색 사각형 = 홈플레이트 스트라이크존 · 빨간 점 = 릴리스·플레이트 통과 지점")
 
 
 def render_model_info():
@@ -868,14 +865,18 @@ with left:
             with st.container(border=True):
                 render_prob_dist(proba, label)
             with st.container(border=True):
-                render_movement(inp)
+                render_strikezone(inp)
+            # 무브먼트 산점도는 실제 데이터를 불러온 경우에만 (실제 분포가 있어 의미 있음)
+            if st.session_state.get('movement_bg'):
+                with st.container(border=True):
+                    render_movement(inp)
         else:
             st.info("사이드바에서 값을 조절해 예측을 실행하세요.")
 
     with tab_traj:
         summary_card()
         with st.container(border=True):
-            render_trajectory(inp, st.session_state.p_throws, label)
+            render_paths(inp, st.session_state.p_throws)
 
     with tab_model:
         summary_card()
