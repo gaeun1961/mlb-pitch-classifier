@@ -568,6 +568,12 @@ def render_paths(inp, p_throws):
     side_x, side_z = compute_trajectory_side(inp)
     top_y, top_x = compute_trajectory_top(inp, p_throws)
 
+    # 궤적 끝점을 모델이 실제 쓰는 plate 좌표(= 로케이션·스트라이크존의 빨간 점)에 맞춘다.
+    # 정상 입력이면 이미 거의 같아 티 안 남. 극단값이라 plate_x/z가 clip된 경우에만 꼬리 보정.
+    w = np.linspace(0.0, 1.0, len(top_x))
+    top_x = np.asarray(top_x) + (inp['plate_x'] - top_x[-1]) * w
+    side_z = np.asarray(side_z) + (inp['plate_z'] - side_z[-1]) * w
+
     fig = go.Figure()
     # 스트라이크존 높이 1.5~3.5ft: 전 구간 가로 점선 + 홈플레이트에 채운 존 박스
     fig.add_hline(y=1.5, line_dash="dot", line_color=ZONE_LINE, line_width=1)
