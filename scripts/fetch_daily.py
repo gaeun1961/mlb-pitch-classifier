@@ -1,11 +1,15 @@
-"""fetch_daily.py - 전날(KST 기준) MLB 경기 Statcast 데이터를 연간 CSV에 누적 저장한다.
+"""fetch_daily.py - 전날 MLB 경기 Statcast 데이터를 연간 CSV에 누적 저장한다.
 
-GitHub Actions에서 매일 KST 새벽 6시(cron: UTC 21:00)에 실행된다.
+GitHub Actions에서 매일 KST 새벽 6시(cron: UTC 21:00)에 실행된다. 타겟 날짜는
+KST가 아니라 UTC 기준 "실행 시점 날짜 - 1일"로 계산한다 — KST 06:00은 UTC로
+전날 21:00이라 KST 기준으로 하루를 빼면 실제로는 UTC 기준 당일이 되어버리고,
+서부 지역 야간 경기는 UTC 기준 다음날 새벽까지 이어지므로 그 날짜 경기가
+아직 안 끝났거나 Statcast에 반영되지 않았을 수 있다. UTC 기준으로 하루 전을
+잡으면 그 날짜의 모든 경기가 확실히 끝난 뒤이다.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 from pybaseball import statcast
@@ -14,8 +18,7 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 def target_date():
-    kst_now = datetime.now(ZoneInfo("Asia/Seoul"))
-    return (kst_now - timedelta(days=1)).date()
+    return (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
 
 def main():
