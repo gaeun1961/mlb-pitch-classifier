@@ -44,6 +44,13 @@ FEAT_KR = {
 
 PITCH_ORDER = ['FF', 'SI', 'SL', 'CU', 'CH', 'FC', 'FS']
 
+# 무브먼트 차트 참조 클러스터용 구종별 대표 (구속, ax, az) — 가이드 테이블 기반 근사.
+# 예측된 점과 같은 식으로 유도 무브먼트(inch)로 변환해 배경에 깐다.
+PITCH_REF = {
+    'FF': (94, 0, -11), 'SI': (94, 9, -17), 'SL': (85, 14, -10),
+    'CU': (78, -10, -24), 'CH': (83, 11, -19), 'FC': (91, -4, -9), 'FS': (86, 0, -29),
+}
+
 # 구종별 만들기 가이드 = (코드, 이름, 구속, az 힌트, ax 힌트)
 # ax 힌트는 우완 기준 · 좌완은 좌우(+/−)가 반전된다.
 GUIDE_ROWS = [
@@ -180,7 +187,7 @@ if 'p_throws' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []          # 이번 세션에서 예측해 본 (ax, az) 이력
 if 'movement_bg' not in st.session_state:
-    st.session_state.movement_bg = None    # (ax[], az[]) — 실제 데이터 로드 시에만 채움
+    st.session_state.movement_bg = None    # (pfx_x_in[], pfx_z_in[]) — 실제 데이터 로드 시에만
 if 'label' not in st.session_state:
     st.session_state.label = None
     st.session_state.conf = None
@@ -199,6 +206,31 @@ st.session_state.setdefault("rx_slider", float(SAMPLE_VALUES['release_pos_x']))
 
 def _snap(v, lo, hi, step=0.5):
     return float(np.clip(round(v / step) * step, lo, hi))
+
+
+def _raw_pfx(spd, ax, az, ext):
+    t = (PITCH_DIST - ext) / max(spd * 1.467, 1)
+    return (0.20 * ax * t + 0.5 * ax * t * t,
+            (-3.0 - 0.15 * az) * t + 0.5 * az * t * t)
+
+
+# 앱의 궤적식은 유도 무브먼트에 일정한 오프셋이 있어(모든 구종이 음수) Savant처럼
+# 0을 기준으로 안 퍼진다. PITCH_REF 7개의 평균을 빼서 "포심 위 / 커브 아래" 로 재중심화.
+_PFX0 = [sum(c) / len(c)
+         for c in zip(*(_raw_pfx(s, a, z, 6.2) for s, a, z in PITCH_REF.values()))]
+
+
+def _pfx_inches(spd, ax, az, ext=6.2):
+    """앱 궤적식 유도 무브먼트를 재중심화해 inch로. 예측 점·참조 클러스터·이력이 모두
+    이 함수를 거쳐 같은 좌표계(위 = 라이징/포심, 아래 = 드롭/커브)를 쓴다."""
+    rx, rz = _raw_pfx(spd, ax, az, ext)
+    return (rx - _PFX0[0]) * 12.0, (rz - _PFX0[1]) * 12.0
+
+
+def in_data_mode():
+    """실제 투구 히스토리가 로드된 모드인지. 릴리스포인트·구속분포·히트맵처럼 여러 투구가
+    있어야 그릴 수 있는 보조 차트는 이때만 렌더한다(아니면 안내 placeholder)."""
+    return st.session_state.get('movement_bg') is not None
 
 
 def _apply_zone_click():
@@ -276,7 +308,8 @@ def run_prediction(inp):
         st.session_state.warmed_up = True
 
         hist = st.session_state.history
-        pt = (float(inp['ax']), float(inp['az']))
+        pt = tuple(round(v, 2) for v in _pfx_inches(
+            inp['release_speed'], inp['ax'], inp['az'], inp['release_extension']))
         if not hist or hist[-1] != pt:
             hist.append(pt)
             del hist[:-40]                  # 최근 40개만 유지
@@ -298,11 +331,13 @@ def select_and_predict_from_df(df):
 
     st.success(f"{len(df_valid):,}개 투구 로드 완료")
 
-    # 무브먼트 차트 배경 = 이 데이터셋의 실제 ax/az 분포 (합성 클러스터 아님)
-    bg = df_valid[['ax', 'az']]
+    # 무브먼트 차트 배경 = 이 데이터셋의 실제 유도 무브먼트(inch). 실제 Statcast pfx_z는
+    # 이미 위=라이징 관례라 부호 반전 없이 그대로 × 12.
+    bg = df_valid[['pfx_x', 'pfx_z']]
     if len(bg) > 500:
         bg = bg.sample(500, random_state=0)
-    st.session_state.movement_bg = (bg['ax'].tolist(), bg['az'].tolist())
+    st.session_state.movement_bg = ((bg['pfx_x'] * 12.0).tolist(),
+                                    (bg['pfx_z'] * 12.0).tolist())
 
     show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
                               'release_spin_rate', 'game_date'] if c in df_valid.columns]
@@ -492,46 +527,61 @@ def render_prob_dist(proba, label):
 
 
 def render_movement(inp):
-    """수평(ax)·수직(az) 평면 위 현재 투구(빨간 링). 배경 회색 점은 실제 데이터가
-    로드됐을 때만 그 데이터셋의 실제 분포로 표시하고, 슬라이더 모드에서는 이번 세션에
-    예측해 본 이력만 찍는다. ax·az는 모델이 쓰는 17개 피처 중 2개일 뿐이라 위치가
-    구종을 결정하지 않는다 — 그래서 합성 클러스터/구종 라벨은 두지 않는다.
-    """
-    st.markdown('<div class="pw-label">궤적 · 무브먼트 차트</div>', unsafe_allow_html=True)
+    """유도 무브먼트(inch) 평면. 원점 중심 12·24인치 동심원 + 구종별 참조 클러스터
+    (회색 원, 라벨 없음, 예측 구종만 빨간 테두리) 위에 현재 예측 투구를 빨간 링으로.
+    세로는 Statcast 관례(위 = 라이징/포심, 아래 = 드롭/커브). 배경 회색 점은 실제
+    데이터 로드 시 그 분포, 아니면 세션 예측 이력. 예측 점·클러스터·이력은 모두
+    같은 식(_pfx_inches)이라 서로 비교 가능하다."""
+    st.markdown('<div class="pw-label">무브먼트 차트 (유도 무브먼트, in)</div>',
+                unsafe_allow_html=True)
     bg = st.session_state.get('movement_bg')
     hist = st.session_state.history
+    label = st.session_state.label
 
     fig = go.Figure()
-    fig.add_hline(y=0, line_color=GRID)
-    fig.add_vline(x=0, line_color=GRID)
+    for r in (12, 24):
+        fig.add_shape(type="circle", x0=-r, y0=-r, x1=r, y1=r, layer="below",
+                      line=dict(color="#e5e5e5", width=1, dash="dot"))
+    fig.add_hline(y=0, line_color="#e5e5e5", line_width=1)
+    fig.add_vline(x=0, line_color="#e5e5e5", line_width=1)
+
+    for code, ref in PITCH_REF.items():
+        cx, cy = _pfx_inches(*ref)
+        hot = code == label
+        fig.add_shape(type="circle", x0=cx - 4.5, y0=cy - 4.5, x1=cx + 4.5, y1=cy + 4.5,
+                      layer="below", fillcolor="rgba(140,143,152,0.10)",
+                      line=dict(color=ACCENT_HEX if hot else "rgba(140,143,152,0.45)",
+                                width=2 if hot else 1))
 
     if bg:
         fig.add_trace(go.Scatter(x=bg[0], y=bg[1], mode='markers',
                                  marker=dict(size=5, color=GRAY_SOFT), hoverinfo='skip'))
         ctx = "회색 점 = 불러온 실제 투구 분포"
     elif hist:
-        fig.add_trace(go.Scatter(
-            x=[h[0] for h in hist], y=[h[1] for h in hist], mode='markers',
-            marker=dict(size=7, color=GRAY_TRAIL), hoverinfo='skip',
-        ))
+        fig.add_trace(go.Scatter(x=[h[0] for h in hist], y=[h[1] for h in hist],
+                                 mode='markers', marker=dict(size=7, color=GRAY_TRAIL),
+                                 hoverinfo='skip'))
         ctx = "회색 점 = 이번 세션에서 예측해 본 투구"
     else:
         ctx = "슬라이더를 움직이면 예측 이력이 쌓입니다"
 
-    fig.add_trace(go.Scatter(x=[inp['ax']], y=[inp['az']], mode='markers',
+    px, py = _pfx_inches(inp['release_speed'], inp['ax'], inp['az'], inp['release_extension'])
+    fig.add_trace(go.Scatter(x=[px], y=[py], mode='markers',
                              marker=dict(size=22, color='rgba(0,0,0,0)',
                                          line=dict(color=ACCENT_HEX, width=3))))
-    fig.add_trace(go.Scatter(x=[inp['ax']], y=[inp['az']], mode='markers',
+    fig.add_trace(go.Scatter(x=[px], y=[py], mode='markers',
                              marker=dict(size=7, color=ACCENT_HEX)))
     fig.update_layout(
-        height=320, margin=dict(l=44, r=20, t=10, b=38),
+        height=380, margin=dict(l=44, r=20, t=10, b=38),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='수평 무브먼트 (ax)', range=[-30, 30], gridcolor=GRID, zeroline=False),
-        yaxis=dict(title='수직 무브먼트 (az)', range=[-50, 15], gridcolor=GRID, zeroline=False),
+        xaxis=dict(title='수평 무브먼트 (in)', range=[-30, 30], gridcolor=GRID,
+                   zeroline=False, scaleanchor='y'),
+        yaxis=dict(title='수직 무브먼트 (in) · 위 라이징 / 아래 드롭', range=[-30, 30],
+                   gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    st.caption(f"빨간 링 = 현재 예측 투구 · {ctx}. ax·az는 모델이 쓰는 17개 피처 중 2개입니다.")
+    st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강) · {ctx}")
 
 
 def render_strikezone(inp, clickable=False):
@@ -1035,10 +1085,6 @@ with left:
                 render_prob_dist(proba, label)
             with st.container(border=True):
                 render_strikezone(inp, clickable=(input_mode == "직접 조작"))
-            # 무브먼트 산점도는 실제 데이터를 불러온 경우에만 (실제 분포가 있어 의미 있음)
-            if st.session_state.get('movement_bg'):
-                with st.container(border=True):
-                    render_movement(inp)
         else:
             with st.container(border=True):
                 st.markdown("사이드바에서 값을 조절하거나 투수를 선택하면 "
@@ -1048,6 +1094,8 @@ with left:
         summary_card()
         with st.container(border=True):
             render_paths(inp, st.session_state.p_throws)
+        with st.container(border=True):
+            render_movement(inp)
 
     with tab_model:
         summary_card()
