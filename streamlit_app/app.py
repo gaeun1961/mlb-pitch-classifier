@@ -213,9 +213,8 @@ def _apply_zone_click():
 
     spd = round(float(st.session_state.inp['release_speed']), 2)
     ext = round(float(st.session_state.inp['release_extension']), 2)
-    rz = SAMPLE_VALUES['release_pos_z']
-    base_rx = abs(SAMPLE_VALUES['release_pos_x'])
-    rx = base_rx if st.session_state.p_throws == 'L' else -base_rx
+    rz = float(st.session_state.inp['release_pos_z'])
+    rx = float(st.session_state.inp['release_pos_x'])
     t = (PITCH_DIST - ext) / max(spd * 1.467, 1)
 
     ax = _snap((px - rx) / (0.2 * t + 0.5 * t * t), -30.0, 30.0)
@@ -779,16 +778,18 @@ with st.sidebar:
         ext = st.slider("릴리스 익스텐션 (ft)", 5.0, 7.5,
                         float(st.session_state.inp['release_extension']), 0.1,
                         help="릴리스 지점이 홈플레이트에 얼마나 가까운지")
-
-        base_rx = abs(SAMPLE_VALUES['release_pos_x'])
-        rx = base_rx if st.session_state.p_throws == 'L' else -base_rx
+        rx = st.slider("릴리스 좌우 (ft)", -3.0, 3.0,
+                       float(st.session_state.inp['release_pos_x']), 0.1,
+                       help="포수 시점 · 음수 = 1루쪽(우완 일반), 양수 = 3루쪽")
+        rz = st.slider("릴리스 높이 (ft)", 4.0, 7.0,
+                       float(st.session_state.inp['release_pos_z']), 0.1,
+                       help="릴리스 암슬롯 높이")
 
         vz0 = round(-3.0 - 0.15 * az, 2)
         # 존 클릭 직후(슬라이더 미조작)면 클릭 높이를 맞춘 vz0을 사용
         if st.session_state.get("_click_ctx") == (ax_, az, round(spd, 2), round(ext, 2)):
             vz0 = st.session_state["_click_vz0"]
         vx0 = round(0.20 * ax_, 2)
-        rz = SAMPLE_VALUES['release_pos_z']
 
         vy0 = -(spd * 1.467)
         dist = PITCH_DIST - ext
@@ -799,7 +800,7 @@ with st.sidebar:
             'release_speed': spd, 'release_spin_rate': spin,
             'release_extension': ext,
             'az': az, 'ax': ax_, 'vz0': vz0, 'vx0': vx0,
-            'release_pos_x': rx, 'vy0': round(vy0, 2),
+            'release_pos_x': rx, 'release_pos_z': rz, 'vy0': round(vy0, 2),
             'effective_speed': round(spd * 0.984, 2),
             'pfx_z': round(vz0 * t + 0.5 * az * t**2, 3),
             'pfx_x': round(vx0 * t + 0.5 * ax_ * t**2, 3),
