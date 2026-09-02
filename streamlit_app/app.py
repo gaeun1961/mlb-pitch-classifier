@@ -110,7 +110,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 .pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
 
 /* 결과 요약 스트립 — 4칸 균등, 각 칸 왼쪽 정렬(라벨 위 / 큰 값 아래). 예측 구종만 빨간 테두리 */
-.pw-summary{display:flex;gap:10px;align-items:stretch;}
+.pw-summary{display:flex;gap:10px;align-items:stretch;margin-bottom:16px;}
 .pw-sum-pred,.pw-sum-chip{flex:1 1 0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;background:#fff;border-radius:12px;padding:8px 14px;}
 .pw-sum-pred{border:1.5px solid var(--accent);}
 .pw-sum-chip{border:1px solid var(--card-border);}
@@ -652,28 +652,30 @@ def _waterfall_contribs(attribution, conf):
 
 
 def render_waterfall(base, ordered):
-    """기준값 → 피처 기여도 누적 → 예측값을 가로 스택 바 하나로 그린다."""
-    top = ordered[:6]
-    rest = sum(c for _, c in ordered[6:])
+    """기준값 → 긍정/부정 기여 합 → 예측값을 가로 바 하나로. 세그먼트를 크게 잡아
+    (피처별 세부는 아래 카드에서) 마우스오버가 잘 잡히게 한다."""
+    pos = sum(c for _, c in ordered if c > 0)
+    neg = sum(c for _, c in ordered if c < 0)
     segs = [("기준값", base, "#dfe1e4")]
-    for f, c in top:
-        segs.append((FEAT_KR.get(f, f), c, ACCENT_HEX if c >= 0 else GRAY))
-    if abs(rest) > 1e-6:
-        segs.append(("기타", rest, ACCENT_HEX if rest >= 0 else GRAY))
+    if pos > 1e-6:
+        segs.append(("긍정 기여 합", pos, ACCENT_HEX))
+    if neg < -1e-6:
+        segs.append(("부정 기여 합", neg, GRAY))
 
     fig = go.Figure()
     cursor = 0.0
     for name, val, color in segs:
         left = cursor if val >= 0 else cursor + val
         fig.add_trace(go.Bar(
-            x=[abs(val)], y=[""], base=left, orientation='h', width=0.6,
-            marker=dict(color=color, line=dict(color="#ffffff", width=1)),
+            x=[abs(val)], y=[""], base=left, orientation='h', width=0.62,
+            marker=dict(color=color, line=dict(color="#ffffff", width=1.5)),
             hovertemplate=f"{name}: {val:+.3f}<extra></extra>",
         ))
         cursor += val
     fig.update_layout(
         barmode='overlay', height=64, margin=dict(l=2, r=2, t=2, b=2),
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', showlegend=False,
+        hovermode='closest',
         xaxis=dict(range=[0, max(cursor, base) * 1.05], visible=False),
         yaxis=dict(visible=False),
     )
@@ -953,7 +955,9 @@ with left:
                 with st.container(border=True):
                     render_movement(inp)
         else:
-            st.info("사이드바에서 값을 조절해 예측을 실행하세요.")
+            with st.container(border=True):
+                st.markdown("사이드바에서 값을 조절하거나 투수를 선택하면 "
+                            "여기에 예측 결과가 표시됩니다.")
 
     with tab_traj:
         summary_card()
