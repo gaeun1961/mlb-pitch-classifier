@@ -681,6 +681,10 @@ def render_strikezone(inp, clickable=False):
                         on_select="rerun", selection_mode="points", key="zone_click")
         st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지 · "
                    "회색 점 = 릴리스 지점")
+        st.caption("좌우는 수평 무브먼트(ax) 슬라이더에 반영되지만, 높이는 수직 무브먼트(az)가 "
+                   "아니라 화면에 없는 초기 수직속도로 맞춥니다 — az로 높이를 맞추려 하면 az 변화가 "
+                   "초기 수직속도에도 반대로 영향을 줘 서로 상쇄돼서, 슬라이더 범위를 넘길 만큼 크게 "
+                   "움직여야 하기 때문입니다. 그래서 클릭해도 '수직 무브먼트' 슬라이더 값 자체는 그대로예요.")
     else:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         st.caption("주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치")
@@ -999,7 +1003,8 @@ with st.sidebar:
         ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, key="ax_slider",
                         help="스트라이크존을 클릭하면 이 값이 자동으로 맞춰집니다")
         az = st.slider("수직 무브먼트 (az)", -50.0, 15.0, step=0.5, key="az_slider",
-                       help="양수=포심(떠오름), 음수=싱커(가라앉음)")
+                       help="양수=포심(떠오름), 음수=싱커(가라앉음) · 스트라이크존 클릭으로는 "
+                            "이 값이 안 바뀝니다(높이는 내부 초기 수직속도로 맞춤) — 직접 움직여야 반영됩니다")
         ext = st.slider("릴리스 익스텐션 (ft)", 5.0, 7.5,
                         float(st.session_state.inp['release_extension']), 0.1,
                         help="릴리스 지점이 홈플레이트에 얼마나 가까운지")
