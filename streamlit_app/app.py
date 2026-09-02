@@ -251,13 +251,18 @@ def in_data_mode():
 
 
 def _apply_zone_click():
-    """스트라이크존 클릭 좌표를 입력에 반영한다.
+    """스트라이크존 클릭 좌표를 ax·az 슬라이더와 실제 궤적에 반영한다.
 
-    - 좌우(px): 사이드바 plate_x 식(vx0 = 0.20·ax)을 뒤집어 ax 슬라이더를 맞춘다.
-    - 높이(pz): plate_z는 az에 거의 둔감해서(계수가 작다) az 대신 vz0을 직접 풀어
-      맞춘다. `_click_vz0`/`_click_ctx`로 넘겨서, 클릭 이후 슬라이더를 건드리기
-      전까지만 이 vz0을 쓰고 그 뒤엔 일반 식으로 돌아간다.
-    구속·회전수·익스텐션은 사용자가 맞춘 값을 그대로 둔다.
+    구속·회전수·익스텐션·릴리스 위치는 고정. 어떤 구종으로 예측되는지는 신경 쓰지
+    않는다 — 그 위치에 실제로 도달하는 데 필요한 값을 그대로 반영하고, 예측은 바뀐
+    값에 맞춰 다시 계산된다.
+
+    - 좌우(ax): plate_x 식을 뒤집어 정확한 ax를 바로 구한다.
+    - 높이(az): az가 vz0 = -3.0-0.15·az에도 연동된다는 걸 감안해, plate_z 식을
+      그대로 뒤집어 az를 직접 정확히 구한다. 존 위/아래 끝처럼 필요한 az가 슬라이더
+      범위(±50)를 넘는 경우에만 클램프하고, 그때는 클램프된 az를 고정값으로 두고
+      vz0을 다시 풀어 최대한 가깝게 맞춘다 — 정상 범위 안이면 슬라이더 값과 실제
+      궤적이 항상 정확히 일치한다.
     """
     sel = st.session_state.get("zone_click")
     if not sel:
@@ -281,10 +286,19 @@ def _apply_zone_click():
     t = (PITCH_DIST - ext) / max(spd * 1.467, 1)
 
     ax = _snap((px - rx) / (0.2 * t + 0.5 * t * t), -30.0, 30.0)
-    az = st.session_state["az_slider"]
-    vz0 = _snap((pz - rz - 0.5 * az * t * t) / t, -14.0, 3.0, step=0.01)
+
+    az_exact = (pz - rz + 3.0 * t) / (0.5 * t * t - 0.15 * t)
+    az = _snap(az_exact, -50.0, 15.0)
+    # az가 정상 범위면 표준 공식(vz0 = -3.0-0.15az)이 이미 클릭 높이에 정확히 맞는다.
+    # 존 위/아래 끝을 클릭해 az가 클램프됐을 때만, 그 클램프된 az를 고정하고 vz0을
+    # 다시 풀어서 최대한 가깝게 맞춘다 — 어느 쪽이든 az 슬라이더 값과 실제 궤적이
+    # 항상 서로 일치한다.
+    vz0 = round(-3.0 - 0.15 * az, 2)
+    if abs(az_exact - az) > 1e-6:
+        vz0 = _snap((pz - rz - 0.5 * az * t * t) / t, -14.0, 3.0, step=0.01)
 
     st.session_state["ax_slider"] = ax
+    st.session_state["az_slider"] = az
     st.session_state["_click_vz0"] = vz0
     st.session_state["_click_ctx"] = (ax, az, spd, ext)
 
@@ -681,10 +695,9 @@ def render_strikezone(inp, clickable=False):
                         on_select="rerun", selection_mode="points", key="zone_click")
         st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지 · "
                    "회색 점 = 릴리스 지점")
-        st.caption("좌우는 수평 무브먼트(ax) 슬라이더에 반영되지만, 높이는 수직 무브먼트(az)가 "
-                   "아니라 화면에 없는 초기 수직속도로 맞춥니다 — az로 높이를 맞추려 하면 az 변화가 "
-                   "초기 수직속도에도 반대로 영향을 줘 서로 상쇄돼서, 슬라이더 범위를 넘길 만큼 크게 "
-                   "움직여야 하기 때문입니다. 그래서 클릭해도 '수직 무브먼트' 슬라이더 값 자체는 그대로예요.")
+        st.caption("좌우(ax)·수직(az) 무브먼트 슬라이더가 클릭한 위치에 실제로 도달하도록 "
+                   "역산되어 바뀝니다 — 구종이 무엇이 되는지는 신경 쓰지 않고, 그 위치에 맞는 "
+                   "움직임 값을 그대로 반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다.")
     else:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         st.caption("주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치")
@@ -1003,8 +1016,8 @@ with st.sidebar:
         ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, key="ax_slider",
                         help="스트라이크존을 클릭하면 이 값이 자동으로 맞춰집니다")
         az = st.slider("수직 무브먼트 (az)", -50.0, 15.0, step=0.5, key="az_slider",
-                       help="양수=포심(떠오름), 음수=싱커(가라앉음) · 스트라이크존 클릭으로는 "
-                            "이 값이 안 바뀝니다(높이는 내부 초기 수직속도로 맞춤) — 직접 움직여야 반영됩니다")
+                       help="양수=포심(떠오름), 음수=싱커(가라앉음) · "
+                            "스트라이크존을 클릭하면 이 값이 자동으로 맞춰집니다")
         ext = st.slider("릴리스 익스텐션 (ft)", 5.0, 7.5,
                         float(st.session_state.inp['release_extension']), 0.1,
                         help="릴리스 지점이 홈플레이트에 얼마나 가까운지")
@@ -1015,7 +1028,8 @@ with st.sidebar:
                        help="릴리스 암슬롯 높이")
 
         vz0 = round(-3.0 - 0.15 * az, 2)
-        # 존 클릭 직후(슬라이더 미조작)면 클릭 높이를 맞춘 vz0을 사용
+        # 존 클릭 직후(슬라이더 미조작)면 클릭 높이를 정확히 맞춘 vz0을 사용 — az
+        # 슬라이더의 표시값이 클램프됐을 때도 실제 궤적은 클릭한 높이에 정확히 도달한다.
         if st.session_state.get("_click_ctx") == (ax_, az, round(spd, 2), round(ext, 2)):
             vz0 = st.session_state["_click_vz0"]
         vx0 = round(0.20 * ax_, 2)
