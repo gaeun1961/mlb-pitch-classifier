@@ -45,11 +45,20 @@ SAMPLE_VALUES = {
 }
 
 
-def predict(input_dict, p_throws='R'):
-    """모델을 직접 로드해 (예측 구종, 신뢰도, 확률 딕셔너리, 피처 기여도, 설명)을 반환한다."""
-    label, confidence, proba, attribution = _model_predict(input_dict)
-    explanation = generate_explanation(input_dict, label, confidence, proba, p_throws)
-    return label, confidence, proba, attribution, explanation
+def predict(input_dict):
+    """모델을 직접 로드해 (예측 구종, 신뢰도, 확률 딕셔너리, 피처 기여도)를 반환한다.
+
+    자연어 설명(Gemini API, 최대 15초 타임아웃)은 여기 포함하지 않는다 — 슬라이더나
+    스트라이크존 클릭마다 자동으로 걸리면 그 인터랙션 자체가 최대 15초씩 막혀서,
+    배포 환경처럼 왕복 지연이 조금만 있어도 "두 번 조작해야 반영되는" 것처럼 느껴진다.
+    설명은 explain()으로 분리해 버튼으로 명시적으로만 호출한다.
+    """
+    return _model_predict(input_dict)
+
+
+def explain(input_dict, label, confidence, proba, p_throws='R'):
+    """자연어 설명을 생성한다 (느린 네트워크 호출 — 명시적으로 요청했을 때만 부른다)."""
+    return generate_explanation(input_dict, label, confidence, proba, p_throws)
 
 
 def compute_trajectory_side(inp, n=50):

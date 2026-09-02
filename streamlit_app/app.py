@@ -11,7 +11,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 from utils import (
-    predict, compute_trajectory_side, compute_trajectory_top,
+    predict, explain, compute_trajectory_side, compute_trajectory_top,
     FEATURE_COLS, PITCH_NAMES, SAMPLE_VALUES, PITCH_DIST,
 )
 
@@ -288,19 +288,29 @@ _apply_zone_click()
 
 
 @st.cache_data(show_spinner=False)
-def _predict_cached(items, p_throws):
-    """동일 입력이면 모델 추론·설명 생성을 다시 하지 않도록 결과를 캐시한다.
+def _predict_cached(items):
+    """동일 입력이면 모델 추론을 다시 하지 않도록 결과를 캐시한다 (빠름, 네트워크 호출 없음).
 
     슬라이더 값이 안 바뀐 rerun(탭 전환, 필터 클릭 등)에서는 즉시 반환된다.
     반환 튜플 끝에 최초 계산 시 측정한 추론 시간(ms)을 함께 담는다.
     """
     t0 = time.perf_counter()
-    label, conf, proba, attribution, explanation = predict(dict(items), p_throws)
-    return label, conf, proba, attribution, explanation, (time.perf_counter() - t0) * 1000
+    label, conf, proba, attribution = predict(dict(items))
+    return label, conf, proba, attribution, (time.perf_counter() - t0) * 1000
+
+
+@st.cache_data(show_spinner=False)
+def _explain_cached(items, p_throws):
+    """자연어 설명 생성 — 느린 Gemini 호출(최대 15초)이라 버튼으로 명시적으로 요청했을 때만 부른다."""
+    label, conf, proba, _ = predict(dict(items))
+    return explain(dict(items), label, conf, proba, p_throws)
 
 
 def run_prediction(inp):
-    """예측을 실행(캐시 경유)하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다."""
+    """빠른 모델 예측만 실행(캐시 경유)하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다.
+
+    자연어 설명은 여기서 부르지 않는다 — render_shap_panel의 "설명 생성" 버튼에서 별도 요청.
+    """
     spinner_msg = (
         "예측 중입니다..." if st.session_state.warmed_up
         else "예측 중입니다... (첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요)"
@@ -308,14 +318,16 @@ def run_prediction(inp):
     try:
         with st.spinner(spinner_msg):
             key = tuple(sorted(inp.items()))
-            label, conf, proba, attribution, explanation, inf_ms = _predict_cached(
-                key, st.session_state.p_throws
-            )
+            label, conf, proba, attribution, inf_ms = _predict_cached(key)
         st.session_state.label = label
         st.session_state.conf = conf
         st.session_state.proba = proba
         st.session_state.attribution = attribution
-        st.session_state.explanation = explanation
+        # run_prediction은 입력이 그대로여도 매 rerun마다 불린다(예: 설명 생성 버튼 클릭
+        # 자체도 rerun을 유발) — 실제로 입력이 바뀌었을 때만 이전 설명을 지운다.
+        if st.session_state.get('_last_pred_key') != key:
+            st.session_state.explanation = None
+        st.session_state['_last_pred_key'] = key
         st.session_state.inf_ms = inf_ms
         st.session_state.warmed_up = True
 
@@ -849,6 +861,11 @@ def render_shap_panel(attribution, conf, label, explanation):
 
     if explanation:
         st.markdown(f'<p class="pw-shap-expl">{explanation}</p>', unsafe_allow_html=True)
+    elif st.button("🔮 자연어 설명 생성", key="gen_explanation"):
+        with st.spinner("설명 생성 중... (최대 15초, 실패 시 규칙 기반 설명으로 대체)"):
+            key = tuple(sorted(st.session_state.inp.items()))
+            st.session_state.explanation = _explain_cached(key, st.session_state.p_throws)
+        st.rerun()
 
     base, contribs = _waterfall_contribs(attribution, conf)
     ordered = sorted(contribs.items(), key=lambda kv: abs(kv[1]), reverse=True)
