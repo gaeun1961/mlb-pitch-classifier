@@ -1,5 +1,6 @@
 """app.py - MLB Pitch Classifier 웹 데모 (Streamlit) · "Pitch Workbench" 라이트 테마"""
 
+import concurrent.futures
 import re
 import time
 from datetime import date, timedelta
@@ -299,17 +300,26 @@ def _predict_cached(items):
     return label, conf, proba, attribution, (time.perf_counter() - t0) * 1000
 
 
-@st.cache_data(show_spinner=False)
-def _explain_cached(items, p_throws):
-    """자연어 설명 생성 — 느린 Gemini 호출(최대 15초)이라 버튼으로 명시적으로 요청했을 때만 부른다."""
+@st.cache_resource
+def _explain_executor():
+    """설명 생성용 백그라운드 스레드 풀 (프로세스당 1개, rerun에도 유지)."""
+    return concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+
+def _explain_worker(items, p_throws):
+    """스레드에서 실행 — st.cache_data는 메인 스크립트 컨텍스트에 의존하므로 여기서는 안 씀."""
     label, conf, proba, _ = predict(dict(items))
     return explain(dict(items), label, conf, proba, p_throws)
 
 
 def run_prediction(inp):
-    """빠른 모델 예측만 실행(캐시 경유)하고 세션 상태를 갱신한다. 실패 시 에러 메시지를 표시한다.
+    """빠른 모델 예측을 실행(캐시 경유)해 세션 상태를 갱신하고, 느린 자연어 설명은
+    백그라운드 스레드에 맡긴다. 실패 시 에러 메시지를 표시한다.
 
-    자연어 설명은 여기서 부르지 않는다 — render_shap_panel의 "설명 생성" 버튼에서 별도 요청.
+    설명 생성(Gemini API, 최대 15초)을 슬라이더 조작 등과 같은 스레드에서 동기 호출하면
+    그 인터랙션 자체가 최대 15초씩 막힌다. 스레드 풀에 맡기고 render_shap_panel의
+    자동 새로고침 프래그먼트가 완료 여부를 폴링하면, 예측·차트는 항상 즉시 반응하면서도
+    설명은 준비되는 대로 자동으로 표시된다.
     """
     spinner_msg = (
         "예측 중입니다..." if st.session_state.warmed_up
@@ -323,10 +333,12 @@ def run_prediction(inp):
         st.session_state.conf = conf
         st.session_state.proba = proba
         st.session_state.attribution = attribution
-        # run_prediction은 입력이 그대로여도 매 rerun마다 불린다(예: 설명 생성 버튼 클릭
-        # 자체도 rerun을 유발) — 실제로 입력이 바뀌었을 때만 이전 설명을 지운다.
+        # run_prediction은 입력이 그대로여도 매 rerun마다 불린다 — 실제로 입력이
+        # 바뀌었을 때만 새 설명 작업을 스레드 풀에 새로 제출한다.
         if st.session_state.get('_last_pred_key') != key:
             st.session_state.explanation = None
+            st.session_state['_explain_future'] = _explain_executor().submit(
+                _explain_worker, key, st.session_state.p_throws)
         st.session_state['_last_pred_key'] = key
         st.session_state.inf_ms = inf_ms
         st.session_state.warmed_up = True
@@ -579,10 +591,15 @@ def render_movement(inp):
     for code, ref in PITCH_REF.items():
         cx, cy = _pfx_inches(*ref)
         hot = code == label
-        fig.add_shape(type="circle", x0=cx - 4.5, y0=cy - 4.5, x1=cx + 4.5, y1=cy + 4.5,
-                      layer="below", fillcolor="rgba(140,143,152,0.10)",
-                      line=dict(color=ACCENT_HEX if hot else "rgba(140,143,152,0.45)",
-                                width=2 if hot else 1))
+        # add_shape는 호버를 못 받으므로, 마우스오버 시 구종명이 뜨도록 큰 마커의
+        # scatter로 그린다(반경 4.5인치 ≈ 이 차트 스케일에서 지름 50px 근사).
+        fig.add_trace(go.Scatter(
+            x=[cx], y=[cy], mode='markers', showlegend=False,
+            marker=dict(size=50, color="rgba(140,143,152,0.10)",
+                        line=dict(color=ACCENT_HEX if hot else "rgba(140,143,152,0.45)",
+                                  width=2 if hot else 1)),
+            hovertemplate=f"{PITCH_NAMES.get(code, code)}<extra></extra>",
+        ))
 
     if bg:
         fig.add_trace(go.Scatter(x=bg[0], y=bg[1], mode='markers',
@@ -845,7 +862,26 @@ def render_feature_card(f, c, mx, label):
     )
 
 
-def render_shap_panel(attribution, conf, label, explanation):
+@st.fragment(run_every=1)
+def _explanation_fragment():
+    """설명이 백그라운드 스레드에서 준비되면 자동으로 표시한다. 1초마다 확인하지만
+    이 프래그먼트만 다시 그려서 슬라이더 등 나머지 UI는 전혀 영향받지 않는다."""
+    future = st.session_state.get('_explain_future')
+    if future is not None and future.done():
+        try:
+            st.session_state.explanation = future.result()
+        except Exception:
+            st.session_state.explanation = None
+        st.session_state['_explain_future'] = None
+
+    explanation = st.session_state.explanation
+    if explanation:
+        st.markdown(f'<p class="pw-shap-expl">{explanation}</p>', unsafe_allow_html=True)
+    elif st.session_state.get('_explain_future') is not None:
+        st.caption("💭 설명 생성 중...")
+
+
+def render_shap_panel(attribution, conf, label):
     st.markdown(
         '<div class="pw-shap-head">'
         '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c53637" '
@@ -859,13 +895,7 @@ def render_shap_panel(attribution, conf, label, explanation):
         st.info("사이드바에서 값을 조절하면 기여도가 표시됩니다.")
         return
 
-    if explanation:
-        st.markdown(f'<p class="pw-shap-expl">{explanation}</p>', unsafe_allow_html=True)
-    elif st.button("🔮 자연어 설명 생성", key="gen_explanation"):
-        with st.spinner("설명 생성 중... (최대 15초, 실패 시 규칙 기반 설명으로 대체)"):
-            key = tuple(sorted(st.session_state.inp.items()))
-            st.session_state.explanation = _explain_cached(key, st.session_state.p_throws)
-        st.rerun()
+    _explanation_fragment()
 
     base, contribs = _waterfall_contribs(attribution, conf)
     ordered = sorted(contribs.items(), key=lambda kv: abs(kv[1]), reverse=True)
@@ -1117,7 +1147,6 @@ with st.sidebar:
 inp = st.session_state.inp
 label, conf, proba = st.session_state.label, st.session_state.conf, st.session_state.proba
 attribution = st.session_state.attribution
-explanation = st.session_state.explanation
 inf_ms = st.session_state.get('inf_ms', 0.0)
 
 def summary_card():
@@ -1139,6 +1168,8 @@ with left:
                 render_prob_dist(proba, label)
             with st.container(border=True):
                 render_strikezone(inp, clickable=(input_mode == "직접 조작"))
+            with st.container(border=True):
+                render_movement(inp)
         else:
             with st.container(border=True):
                 st.markdown("사이드바에서 값을 조절하거나 투수를 선택하면 "
@@ -1148,8 +1179,6 @@ with left:
         summary_card()
         with st.container(border=True):
             render_paths(inp, st.session_state.p_throws)
-        with st.container(border=True):
-            render_movement(inp)
 
     with tab_model:
         summary_card()
@@ -1158,4 +1187,4 @@ with left:
 
 with right:
     with st.container(border=True):
-        render_shap_panel(attribution, conf, label, explanation)
+        render_shap_panel(attribution, conf, label)
