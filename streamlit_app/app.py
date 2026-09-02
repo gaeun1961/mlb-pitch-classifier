@@ -498,7 +498,7 @@ def render_summary(label, conf, inf_ms):
         f'<span class="pw-sum-chip"><span class="pw-sum-k">신뢰도</span>'
         f'<span class="pw-sum-v">{conf * 100:.0f}%</span></span>'
         '<span class="pw-sum-chip"><span class="pw-sum-k">모델 정확도</span>'
-        '<span class="pw-sum-v">94.2%</span></span>'
+        '<span class="pw-sum-v">93.4%</span></span>'
         f'<span class="pw-sum-chip"><span class="pw-sum-k">추론 시간</span>'
         f'<span class="pw-sum-v">{inf_ms:.0f}ms</span></span>'
         '</div>',
@@ -703,12 +703,12 @@ def render_paths(inp, p_throws):
 def render_model_info():
     st.markdown('<div class="pw-label">모델 정보</div>', unsafe_allow_html=True)
     m1, m2, m3 = st.columns(3)
-    m1.metric("Weighted F1", "0.94")
-    m2.metric("Test Accuracy", "94.2%")
+    m1.metric("Weighted F1", "0.93")
+    m2.metric("Test Accuracy", "93.4%")
     m3.metric("Pitch Types", "7")
     st.caption(
         "17개 Statcast 피처를 입력하면 MLP 신경망이 7가지 구종 중 하나를 예측합니다. "
-        "MLB Statcast 2024 정규시즌 데이터로 학습 · Weighted F1 0.94 · "
+        "MLB Statcast 2024~2025 정규시즌 데이터로 학습 · Weighted F1 0.93 · "
         "모델은 lru_cache로 프로세스당 1회만 로드됩니다."
     )
 

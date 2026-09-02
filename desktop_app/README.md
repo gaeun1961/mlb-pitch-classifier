@@ -21,7 +21,7 @@ pip install pybaseball
 ```
 src/data_loader.py 실행
 ```
-- `data/statcast_2024.csv` 생성 (처음 실행 시 10~15분, 이후 캐시 사용)
+- `data/statcast_2024.csv`, `data/statcast_2025.csv` 생성 (처음 실행 시 20~30분, 이후 캐시 사용)
 
 ### 2단계. 모델 학습
 ```
@@ -80,4 +80,4 @@ desktop_app/
 
 ## 주의사항
 - `train.py` 실행 전 `data_loader.py`를 반드시 먼저 실행할 것
-- `data/statcast_2024.csv`가 있으면 `data_loader.py`는 재실행 불필요
+- `data/statcast_2024.csv`, `data/statcast_2025.csv`가 있으면 `data_loader.py`는 재실행 불필요
