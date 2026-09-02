@@ -1007,7 +1007,9 @@ with st.sidebar:
         if favs:
             st.markdown('<div class="pw-label">⭐ 즐겨찾기 (이번 세션)</div>', unsafe_allow_html=True)
             for f in favs:
-                if st.button(f['label'], key=f"favbtn_{f['id']}", use_container_width=True):
+                # 구버전 세션엔 'label' 없이 {'id','name'}만 있을 수 있음 — 배포 중 세션이
+                # 유지되면 즐겨찾기 스키마가 바뀌어도 session_state는 그대로 남는다.
+                if st.button(f.get('label', f['name']), key=f"favbtn_{f['id']}", use_container_width=True):
                     st.session_state.pitcher_query = f['name']
                     st.rerun()
 
