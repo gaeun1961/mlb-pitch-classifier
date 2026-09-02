@@ -568,6 +568,12 @@ def render_paths(inp, p_throws):
     side_x, side_z = compute_trajectory_side(inp)
     top_y, top_x = compute_trajectory_top(inp, p_throws)
 
+    # 극단적인 슬라이더 조합이면 궤적이 고정 범위를 벗어나 잘려 보이므로 축을 늘린다
+    z_lo = min(0.0, float(min(side_z)) - 0.3)
+    z_hi = max(8.0, float(max(side_z)) + 0.3)
+    x_lo = min(-3.0, float(min(top_x)) - 0.4)
+    x_hi = max(3.0, float(max(top_x)) + 0.4)
+
     fig = go.Figure()
     fig.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=1.5, y1=3.5,
                   line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
@@ -580,7 +586,7 @@ def render_paths(inp, p_throws):
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
         xaxis=dict(title='거리 (ft) · 측면뷰', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
-        yaxis=dict(title='높이 (ft)', range=[0, 8], gridcolor=GRID, zeroline=False),
+        yaxis=dict(title='높이 (ft)', range=[z_lo, z_hi], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
@@ -596,7 +602,7 @@ def render_paths(inp, p_throws):
         height=320, margin=dict(l=40, r=10, t=10, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft) · 상단뷰', range=[-3, 3], gridcolor=GRID, zeroline=False),
+        xaxis=dict(title='좌우 (ft) · 상단뷰', range=[x_lo, x_hi], gridcolor=GRID, zeroline=False),
         yaxis=dict(title='거리 (ft)', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
