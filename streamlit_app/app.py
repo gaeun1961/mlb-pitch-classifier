@@ -198,17 +198,17 @@ if 'label' not in st.session_state:
 if 'warmed_up' not in st.session_state:
     st.session_state.warmed_up = False
 if 'favorites' not in st.session_state:
-    st.session_state.favorites = []          # [{"id":, "name":}] — 이번 세션 한정(로그인 없어 서버 저장 불가)
+    st.session_state.favorites = []          # [{"id":, "name":, "label":}] — 이번 세션 한정(로그인 없어 서버 저장 불가)
 
 MAX_FAVORITES = 10
 
 
-def toggle_favorite(pid, name):
+def toggle_favorite(pid, name, label):
     favs = st.session_state.favorites
     if any(f['id'] == pid for f in favs):
         st.session_state.favorites = [f for f in favs if f['id'] != pid]
     elif len(favs) < MAX_FAVORITES:
-        favs.append({'id': pid, 'name': name})
+        favs.append({'id': pid, 'name': name, 'label': label})
 
 # ax/az/릴리스좌우 슬라이더는 key 기반(클릭·손 전환으로도 값이 바뀜). 최초 1회만 시드.
 st.session_state.setdefault("ax_slider", float(SAMPLE_VALUES['ax']))
@@ -989,9 +989,8 @@ with st.sidebar:
         favs = st.session_state.favorites
         if favs:
             st.markdown('<div class="pw-label">⭐ 즐겨찾기 (이번 세션)</div>', unsafe_allow_html=True)
-            fav_cols = st.columns(len(favs))
-            for col, f in zip(fav_cols, favs):
-                if col.button(f['name'], key=f"favbtn_{f['id']}", use_container_width=True):
+            for f in favs:
+                if st.button(f['label'], key=f"favbtn_{f['id']}", use_container_width=True):
                     st.session_state.pitcher_query = f['name']
                     st.rerun()
 
@@ -1014,14 +1013,16 @@ with st.sidebar:
                 st.error("선수를 찾을 수 없습니다.")
             elif candidates:
                 options = {career_label(c): c for c in candidates}
-                choice = st.selectbox("검색 결과", options=list(options.keys()))
+                c_star, c_select = st.columns([1, 11])
+                choice = c_select.selectbox("검색 결과", options=list(options.keys()))
                 chosen = options[choice]
                 st.session_state.p_throws = chosen['throws']
 
                 is_fav = any(f['id'] == chosen['id'] for f in st.session_state.favorites)
-                fav_label = "⭐ 즐겨찾기 해제" if is_fav else "☆ 즐겨찾기에 추가"
-                if st.button(fav_label, key=f"fav_toggle_{chosen['id']}"):
-                    toggle_favorite(chosen['id'], chosen['name'])
+                c_star.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
+                if c_star.button("⭐" if is_fav else "☆", key=f"fav_toggle_{chosen['id']}",
+                                  help="즐겨찾기 해제" if is_fav else "즐겨찾기에 추가"):
+                    toggle_favorite(chosen['id'], chosen['name'], choice)
                     st.rerun()
 
                 bounds = pitcher_date_bounds(chosen)
