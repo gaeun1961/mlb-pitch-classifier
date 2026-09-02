@@ -1,0 +1,74 @@
+name: Retrain Model
+
+# 수동 실행 전용 — 새 모델이 이전보다 항상 더 낫다는 보장이 없어서(2024+2025 재학습 때
+# 정확도가 94.2%→93.36%로 내려간 전례가 있음), 자동 배포 대신 PR로 올려 리뷰 후 병합한다.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pandas numpy scikit-learn matplotlib pybaseball tensorflow-cpu==2.20.0
+
+      - name: Train model (downloads TRAIN_SEASONS, trains, saves artifacts)
+        working-directory: desktop_app/src
+        run: python train.py
+
+      - name: Package artifacts and open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          cp desktop_app/model/pitch_model.h5 backend/model/pitch_model.h5
+          cp desktop_app/model/scaler.pkl backend/model/scaler.pkl
+          cp desktop_app/model/label_encoder.pkl backend/model/label_encoder.pkl
+          cp desktop_app/results/confusion_matrix.png results/confusion_matrix.png
+          cp desktop_app/results/loss_accuracy.png results/loss_accuracy.png
+
+          BRANCH="model/auto-retrain-$(date -u +%Y%m%d)"
+          git checkout -b "$BRANCH"
+          git add backend/model/ results/
+          if git diff --cached --quiet; then
+            echo "No change from current model, nothing to open a PR for."
+            exit 0
+          fi
+          git commit -m "Auto-retrain: model refresh $(date -u +%Y-%m-%d)"
+          git push -u origin "$BRANCH"
+
+          METRICS=$(cat desktop_app/results/metrics.md 2>/dev/null || echo "메트릭 요약을 찾을 수 없습니다 — 실행 로그를 확인하세요.")
+          gh pr create --title "🤖 자동 재학습: 모델 갱신 $(date -u +%Y-%m-%d)" --body "$(cat <<EOF
+          매뉴얼 트리거로 실행된 재학습 결과입니다. 병합 전에 아래 지표와 confusion_matrix.png/loss_accuracy.png를 검토해주세요 — 새 모델이 항상 더 낫다는 보장은 없습니다 (README/앱 캡션의 정확도 문구도 필요시 함께 갱신).
+
+          $METRICS
+          EOF
+          )"
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="🔴 재학습 실패"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          EXISTING=$(gh issue list --search "$TITLE in:title" --state open --json number --jq '.[0].number')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "다시 실패했습니다: $RUN_URL"
+          else
+            gh issue create --title "$TITLE" --body "워크플로우 실행이 실패했습니다: $RUN_URL"
+          fi

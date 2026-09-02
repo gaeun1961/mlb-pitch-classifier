@@ -197,6 +197,18 @@ if 'label' not in st.session_state:
     st.session_state.inf_ms = 0.0
 if 'warmed_up' not in st.session_state:
     st.session_state.warmed_up = False
+if 'favorites' not in st.session_state:
+    st.session_state.favorites = []          # [{"id":, "name":}] — 이번 세션 한정(로그인 없어 서버 저장 불가)
+
+MAX_FAVORITES = 10
+
+
+def toggle_favorite(pid, name):
+    favs = st.session_state.favorites
+    if any(f['id'] == pid for f in favs):
+        st.session_state.favorites = [f for f in favs if f['id'] != pid]
+    elif len(favs) < MAX_FAVORITES:
+        favs.append({'id': pid, 'name': name})
 
 # ax/az/릴리스좌우 슬라이더는 key 기반(클릭·손 전환으로도 값이 바뀜). 최초 1회만 시드.
 st.session_state.setdefault("ax_slider", float(SAMPLE_VALUES['ax']))
@@ -967,9 +979,18 @@ with st.sidebar:
             f"{STATCAST_START_YEAR}년 이전 활동 선수는 그 이후 시즌 기록만 조회할 수 있어요. "
             "이름을 비워두면 날짜만으로도 검색할 수 있습니다."
         )
+        favs = st.session_state.favorites
+        if favs:
+            st.markdown('<div class="pw-label">⭐ 즐겨찾기 (이번 세션)</div>', unsafe_allow_html=True)
+            fav_cols = st.columns(len(favs))
+            for col, f in zip(fav_cols, favs):
+                if col.button(f['name'], key=f"favbtn_{f['id']}", use_container_width=True):
+                    st.session_state.pitcher_query = f['name']
+                    st.rerun()
+
         query = st.text_input(
             "투수 이름 (2글자 이상, 영어 · 비워두면 날짜로만 검색)",
-            placeholder="Gerrit Cole",
+            placeholder="Gerrit Cole", key="pitcher_query",
         ).strip()
 
         if query and contains_korean(query):
@@ -989,6 +1010,12 @@ with st.sidebar:
                 choice = st.selectbox("검색 결과", options=list(options.keys()))
                 chosen = options[choice]
                 st.session_state.p_throws = chosen['throws']
+
+                is_fav = any(f['id'] == chosen['id'] for f in st.session_state.favorites)
+                fav_label = "⭐ 즐겨찾기 해제" if is_fav else "☆ 즐겨찾기에 추가"
+                if st.button(fav_label, key=f"fav_toggle_{chosen['id']}"):
+                    toggle_favorite(chosen['id'], chosen['name'])
+                    st.rerun()
 
                 bounds = pitcher_date_bounds(chosen)
                 if bounds is None:

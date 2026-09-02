@@ -4,7 +4,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, f1_score
 
 from data_loader import load_data, FEATURE_COLS
 from model import build_model, get_callbacks
@@ -42,9 +42,8 @@ def save_loss_accuracy(history):
     print(f'[결과] 학습 곡선 저장: {path}')
 
 
-def save_confusion_matrix(model, X_test, y_test, label_map):
+def save_confusion_matrix(y_test, y_pred, label_map):
     """테스트 세트에 대한 혼동 행렬을 계산하고 이미지로 저장한다."""
-    y_pred = np.argmax(model.predict(X_test), axis=1)
     labels = [label_map[i] for i in range(len(label_map))]
 
     cm  = confusion_matrix(y_test, y_pred)
@@ -59,6 +58,23 @@ def save_confusion_matrix(model, X_test, y_test, label_map):
     plt.savefig(path)
     plt.close()
     print(f'[결과] 혼동 행렬 저장: {path}')
+
+
+def save_metrics_summary(y_test, y_pred, label_map, acc):
+    """정확도·weighted F1·구종별 classification report를 PR/기록용 마크다운으로 저장한다."""
+    labels = [label_map[i] for i in range(len(label_map))]
+    report = classification_report(y_test, y_pred, target_names=labels, digits=2)
+    weighted_f1 = f1_score(y_test, y_pred, average='weighted')
+
+    path = os.path.join(RESULTS_DIR, 'metrics.md')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(f"**테스트 정확도**: {acc * 100:.2f}%  \n")
+        f.write(f"**Weighted F1**: {weighted_f1:.4f}  \n")
+        f.write(f"**테스트 세트**: {len(y_test):,}건\n\n")
+        f.write("```\n" + report + "\n```\n")
+
+    print(f'[결과] 메트릭 요약 저장: {path}')
+    return weighted_f1
 
 
 def train():
@@ -82,9 +98,11 @@ def train():
 
     loss, acc = model.evaluate(X_test, y_test, verbose=0)
     print(f'\n[평가] 테스트 정확도: {acc * 100:.2f}%')
+    y_pred = np.argmax(model.predict(X_test, verbose=0), axis=1)
 
     save_loss_accuracy(history)
-    save_confusion_matrix(model, X_test, y_test, label_map)
+    save_confusion_matrix(y_test, y_pred, label_map)
+    save_metrics_summary(y_test, y_pred, label_map, acc)
 
 
 if __name__ == '__main__':
