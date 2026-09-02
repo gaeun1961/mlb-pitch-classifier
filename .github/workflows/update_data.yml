@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   fetch:
@@ -40,4 +41,18 @@ jobs:
               git pull --rebase origin main
             done
             exit 1
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="🔴 일일 데이터 수집 실패"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          EXISTING=$(gh issue list --search "$TITLE in:title" --state open --json number --jq '.[0].number')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "다시 실패했습니다: $RUN_URL"
+          else
+            gh issue create --title "$TITLE" --body "워크플로우 실행이 실패했습니다: $RUN_URL"
           fi
