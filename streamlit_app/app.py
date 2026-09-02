@@ -156,9 +156,14 @@ div[role="radiogroup"] > label:has(input:checked){background:var(--text);border-
 div[role="radiogroup"] > label:has(input:checked) div{color:#fff;}
 div[role="radiogroup"] > label > div:first-child{display:none;}
 
-/* 입력창(텍스트·날짜·셀렉트) 외곽선 — 흰 배경에서 안 보이던 것 */
-div[data-baseweb="input"],div[data-baseweb="select"]>div{border:1px solid var(--card-border) !important;border-radius:8px !important;background:#fff !important;}
-div[data-baseweb="input"]:focus-within,div[data-baseweb="select"]>div:focus-within{border-color:var(--accent) !important;}
+/* 입력창 — 테두리는 config.toml showWidgetBorder가 그려주고, 여기선 연한 회색
+   채움을 더해 흰 배경에서도 필드 경계가 확실히 보이게 한다 */
+[data-testid="stTextInputRootElement"],
+.stTextInput div[data-baseweb="base-input"],
+.stDateInput div[data-baseweb="input"],
+.stNumberInput div[data-baseweb="input"],
+.stSelectbox div[data-baseweb="select"] > div{background:#f4f5f7 !important;}
+.stTextInput input,.stDateInput input,.stNumberInput input{background:#f4f5f7 !important;}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
