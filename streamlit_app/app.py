@@ -109,13 +109,13 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 .pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
 .pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
 
-/* 결과 요약 칩 — 카드 폭을 4등분해 꽉 채우고, 수치를 크게. 예측 구종만 빨간 외곽선 */
-.pw-summary{display:flex;gap:10px;align-items:stretch;width:100%;}
-.pw-sum-pred,.pw-sum-chip{flex:1 1 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;background:#fff;border-radius:12px;padding:10px 8px;}
+/* 결과 요약 스트립 — 4칸 균등, 각 칸 왼쪽 정렬(라벨 위 / 큰 값 아래). 예측 구종만 빨간 테두리 */
+.pw-summary{display:flex;gap:10px;align-items:stretch;}
+.pw-sum-pred,.pw-sum-chip{flex:1 1 0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;background:#fff;border-radius:12px;padding:8px 14px;}
 .pw-sum-pred{border:1.5px solid var(--accent);}
 .pw-sum-chip{border:1px solid var(--card-border);}
-.pw-sum-k{font-size:0.7rem;font-weight:600;color:var(--text-3);letter-spacing:0.02em;}
-.pw-sum-v{font-family:'Sora';font-size:1.15rem;font-weight:700;color:var(--text);line-height:1.15;}
+.pw-sum-k{font-size:0.66rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-3);}
+.pw-sum-v{font-family:'Sora';font-size:1.2rem;font-weight:700;color:var(--text);line-height:1.1;}
 .pw-sum-pred .pw-sum-v{display:inline-flex;align-items:center;gap:6px;}
 .pw-sum-pred i{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;}
 
@@ -930,10 +930,10 @@ explanation = st.session_state.explanation
 inf_ms = st.session_state.get('inf_ms', 0.0)
 
 def summary_card():
-    """예측 요약 칩 — 각 탭 바 바로 아래에 반복 렌더해 어느 탭에서도 보이게 한다."""
+    """예측 요약 스트립 — 각 탭 바 바로 아래에 반복 렌더해 어느 탭에서도 보이게 한다.
+    칩 자체가 테두리를 가지므로 바깥 카드로 한 번 더 감싸지 않는다(이중 박스 방지)."""
     if label:
-        with st.container(border=True):
-            render_summary(label, conf, inf_ms)
+        render_summary(label, conf, inf_ms)
 
 
 left, right = st.columns([2.2, 1], gap="large")
