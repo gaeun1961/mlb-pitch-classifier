@@ -109,11 +109,15 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 .pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
 .pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
 
-/* 결과 요약 칩 — 예측 구종만 빨간 외곽선, 나머지는 회색 보더 */
-.pw-summary{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
-.pw-sum-pred{display:inline-flex;align-items:center;gap:7px;font-family:'Sora';font-weight:700;font-size:0.95rem;color:var(--text);background:#fff;border:1.5px solid var(--accent);padding:5px 12px;border-radius:999px;}
+/* 결과 요약 칩 — 카드 폭을 4등분해 꽉 채우고, 수치를 크게. 예측 구종만 빨간 외곽선 */
+.pw-summary{display:flex;gap:10px;align-items:stretch;width:100%;}
+.pw-sum-pred,.pw-sum-chip{flex:1 1 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;background:#fff;border-radius:12px;padding:10px 8px;}
+.pw-sum-pred{border:1.5px solid var(--accent);}
+.pw-sum-chip{border:1px solid var(--card-border);}
+.pw-sum-k{font-size:0.7rem;font-weight:600;color:var(--text-3);letter-spacing:0.02em;}
+.pw-sum-v{font-family:'Sora';font-size:1.15rem;font-weight:700;color:var(--text);line-height:1.15;}
+.pw-sum-pred .pw-sum-v{display:inline-flex;align-items:center;gap:6px;}
 .pw-sum-pred i{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;}
-.pw-sum-chip{font-size:0.8rem;font-weight:600;color:var(--text-2);background:#fff;border:1px solid var(--card-border);padding:5px 12px;border-radius:999px;}
 
 /* 구종별 확률 바 — 전부 회색, 예측 구종만 빨강 */
 .pw-bar-row{display:flex;align-items:center;gap:10px;margin:6px 0;}
@@ -438,10 +442,14 @@ def render_guide(p_throws):
 def render_summary(label, conf, inf_ms):
     st.markdown(
         '<div class="pw-summary">'
-        f'<span class="pw-sum-pred"><i></i>{PITCH_NAMES.get(label, label)}</span>'
-        f'<span class="pw-sum-chip">신뢰도 {conf * 100:.0f}%</span>'
-        '<span class="pw-sum-chip">모델 정확도 94.2%</span>'
-        f'<span class="pw-sum-chip">추론 시간 {inf_ms:.0f}ms</span>'
+        '<span class="pw-sum-pred"><span class="pw-sum-k">예측 구종</span>'
+        f'<span class="pw-sum-v"><i></i>{PITCH_NAMES.get(label, label)}</span></span>'
+        f'<span class="pw-sum-chip"><span class="pw-sum-k">신뢰도</span>'
+        f'<span class="pw-sum-v">{conf * 100:.0f}%</span></span>'
+        '<span class="pw-sum-chip"><span class="pw-sum-k">모델 정확도</span>'
+        '<span class="pw-sum-v">94.2%</span></span>'
+        f'<span class="pw-sum-chip"><span class="pw-sum-k">추론 시간</span>'
+        f'<span class="pw-sum-v">{inf_ms:.0f}ms</span></span>'
         '</div>',
         unsafe_allow_html=True,
     )
