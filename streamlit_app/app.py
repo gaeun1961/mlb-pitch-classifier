@@ -191,9 +191,10 @@ if 'label' not in st.session_state:
 if 'warmed_up' not in st.session_state:
     st.session_state.warmed_up = False
 
-# ax/az 슬라이더는 key 기반(클릭으로도 값이 바뀔 수 있어서). 최초 1회만 시드.
+# ax/az/릴리스좌우 슬라이더는 key 기반(클릭·손 전환으로도 값이 바뀜). 최초 1회만 시드.
 st.session_state.setdefault("ax_slider", float(SAMPLE_VALUES['ax']))
 st.session_state.setdefault("az_slider", float(SAMPLE_VALUES['az']))
+st.session_state.setdefault("rx_slider", float(SAMPLE_VALUES['release_pos_x']))
 
 
 def _snap(v, lo, hi, step=0.5):
@@ -813,27 +814,53 @@ with st.sidebar:
             "입력 방식", ["직접 조작", "투수 검색"],
             horizontal=True, label_visibility="collapsed",
         )
+    _manual = input_mode == "직접 조작"
+    _mode_changed = st.session_state.get("_prev_mode") != input_mode
+    st.session_state["_prev_mode"] = input_mode
+
+    # 투구 손 ↔ 릴리스 좌우 양방향 연동. 손 라디오 렌더 전에 session_state를 맞춰둔다.
+    _sync_hand = st.session_state.get("_sync_hand")
+    _cur_rx = float(st.session_state.get("rx_slider", SAMPLE_VALUES['release_pos_x']))
+    if _manual and _mode_changed:
+        st.session_state["ax_slider"] = _snap(st.session_state.inp['ax'], -30.0, 30.0)
+        st.session_state["az_slider"] = _snap(st.session_state.inp['az'], -50.0, 15.0)
+        st.session_state["rx_slider"] = _snap(st.session_state.inp['release_pos_x'], -3.0, 3.0, 0.1)
+        _cur_rx = st.session_state["rx_slider"]
+    elif _manual and st.session_state.get("_sync_rx") is not None \
+            and abs(_cur_rx - st.session_state["_sync_rx"]) > 1e-6:
+        # 릴리스 좌우를 움직였고 부호가 손과 안 맞으면 → 손을 부호에 맞춘다
+        _want = 'L' if _cur_rx > 0 else 'R'
+        if st.session_state.get("hand") != _want:
+            st.session_state["hand"] = _want
+            _sync_hand = _want   # 아래 "손 변경" 체크가 이걸 사용자 조작으로 오인 안 하게
+
     with _c_hand:
         st.markdown('<div class="pw-label">투구 손</div>', unsafe_allow_html=True)
         hand = st.radio(
             "투구 손", options=['R', 'L'],
             format_func=lambda v: '우완 (R)' if v == 'R' else '좌완 (L)',
             horizontal=True, key='hand', label_visibility="collapsed",
-            disabled=(input_mode != "직접 조작"),
-            help=None if input_mode == "직접 조작" else "투수 검색 시 데이터에서 자동 반영됩니다.",
+            disabled=not _manual,
+            help="릴리스 방향·가이드 표시에 반영 (예측은 17개 수치로 계산)"
+            if _manual else "투수 검색 시 데이터에서 자동 반영됩니다.",
         )
-    if input_mode == "직접 조작":
+
+    if _manual:
         st.session_state.p_throws = hand
-    _mode_changed = st.session_state.get("_prev_mode") != input_mode
-    st.session_state["_prev_mode"] = input_mode
+        # 손을 사용자가 바꿨으면 좌우를 거울상으로: 릴리스 좌우 부호를 손에 맞추고
+        # 수평 무브먼트(ax)도 반전한다 (크기는 유지). az·구속·스핀은 손과 무관.
+        if not _mode_changed and _sync_hand is not None and hand != _sync_hand:
+            _mag = abs(_cur_rx) if abs(_cur_rx) > 0.2 else abs(SAMPLE_VALUES['release_pos_x'])
+            st.session_state["rx_slider"] = _snap(_mag * (1.0 if hand == 'L' else -1.0),
+                                                  -3.0, 3.0, 0.1)
+            st.session_state["ax_slider"] = _snap(-float(st.session_state["ax_slider"]),
+                                                  -30.0, 30.0)
+        st.session_state["_sync_hand"] = hand
+        st.session_state["_sync_rx"] = float(st.session_state["rx_slider"])
+
     st.markdown("---")
 
-    if input_mode == "직접 조작":
-        # 다른 모드에서 막 넘어왔으면 ax/az 슬라이더를 현재 입력값으로 동기화
-        if _mode_changed:
-            st.session_state["ax_slider"] = _snap(st.session_state.inp['ax'], -30.0, 30.0)
-            st.session_state["az_slider"] = _snap(st.session_state.inp['az'], -50.0, 15.0)
-
+    if _manual:
         spd = st.slider("구속 (mph)", 60.0, 105.0, float(st.session_state.inp['release_speed']),
                         0.5, help="빠를수록 FF/FC 계열")
         spin = st.slider("스핀레이트 (rpm)", 1500.0, 3500.0,
@@ -846,9 +873,8 @@ with st.sidebar:
         ext = st.slider("릴리스 익스텐션 (ft)", 5.0, 7.5,
                         float(st.session_state.inp['release_extension']), 0.1,
                         help="릴리스 지점이 홈플레이트에 얼마나 가까운지")
-        rx = st.slider("릴리스 좌우 (ft)", -3.0, 3.0,
-                       float(st.session_state.inp['release_pos_x']), 0.1,
-                       help="포수 시점 · 음수 = 1루쪽(우완 일반), 양수 = 3루쪽")
+        rx = st.slider("릴리스 좌우 (ft)", -3.0, 3.0, step=0.1, key="rx_slider",
+                       help="투구 손과 자동 연동 · 음수 = 우완(1루쪽), 양수 = 좌완(3루쪽)")
         rz = st.slider("릴리스 높이 (ft)", 4.0, 7.0,
                        float(st.session_state.inp['release_pos_z']), 0.1,
                        help="릴리스 암슬롯 높이")
