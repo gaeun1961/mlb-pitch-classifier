@@ -569,14 +569,24 @@ def render_paths(inp, p_throws):
     top_y, top_x = compute_trajectory_top(inp, p_throws)
 
     fig = go.Figure()
-    fig.add_shape(type="rect", x0=PITCH_DIST - 1.7, x1=PITCH_DIST, y0=1.5, y1=3.5,
-                  line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
+    # 스트라이크존 높이 1.5~3.5ft: 전 구간 가로 점선 + 홈플레이트에 채운 존 박스
+    fig.add_hline(y=1.5, line_dash="dot", line_color=ZONE_LINE, line_width=1)
+    fig.add_hline(y=3.5, line_dash="dot", line_color=ZONE_LINE, line_width=1)
+    fig.add_shape(type="rect", x0=PITCH_DIST - 1.5, x1=PITCH_DIST, y0=1.5, y1=3.5,
+                  line=dict(color=ZONE_LINE, width=2),
+                  fillcolor="rgba(140,143,152,0.14)", layer="below")
+    # 투수판(거리 0) · 홈플레이트(거리 60.5)
+    fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=0.6, line=dict(color=ZONE_LINE, width=5))
+    fig.add_annotation(x=0, y=0.6, yshift=9, text="투수판", showarrow=False,
+                       font=dict(size=9, color=AXIS_TEXT))
+    fig.add_annotation(x=PITCH_DIST, y=3.5, yshift=10, text="홈플레이트", showarrow=False,
+                       font=dict(size=9, color=AXIS_TEXT))
     fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
                              line=dict(color=ACCENT_HEX, width=3)))
     fig.add_trace(go.Scatter(x=[side_x[0], side_x[-1]], y=[side_z[0], side_z[-1]],
                              mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
     fig.update_layout(
-        height=280, margin=dict(l=40, r=10, t=10, b=30),
+        height=300, margin=dict(l=40, r=10, t=10, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
         xaxis=dict(title='거리 (ft) · 측면뷰', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
