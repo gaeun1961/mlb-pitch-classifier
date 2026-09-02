@@ -47,13 +47,13 @@ PITCH_ORDER = ['FF', 'SI', 'SL', 'CU', 'CH', 'FC', 'FS']
 # 구종별 만들기 가이드 = (코드, 이름, 구속, az 힌트, ax 힌트)
 # ax 힌트는 우완 기준 · 좌완은 좌우(+/−)가 반전된다.
 GUIDE_ROWS = [
-    ('FF', '포심패스트볼', '93+', 'az↑', '~0'),
-    ('SI', '싱커', '92+', 'az↓살짝', '+'),
-    ('SL', '슬라이더', '82-88', 'az0/−', '++'),
-    ('CU', '커브', '75-82', 'az−−', '−'),
-    ('CH', '체인지업', '80-87', 'az−', '+'),
-    ('FC', '커터', '88-94', 'az~0', '−'),
-    ('FS', '스플리터', '83-90', 'az−−−', '~0'),
+    ('FF', '포심', '93+', '↑', '~0'),
+    ('SI', '싱커', '92+', '↓ 살짝', '+'),
+    ('SL', '슬라이더', '82-88', '0 / −', '++'),
+    ('CU', '커브', '75-82', '−−', '−'),
+    ('CH', '체인지업', '80-87', '−', '+'),
+    ('FC', '커터', '88-94', '~0', '−'),
+    ('FS', '스플리터', '83-90', '−−−', '~0'),
 ]
 
 # ── 디자인 토큰 · 라이트 테마 CSS ────────────────────────
@@ -139,9 +139,13 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 .pw-fmag span{display:block;height:100%;border-radius:999px;}
 .pw-fdesc{font-size:0.78rem;line-height:1.55;color:var(--text-3);margin:0;}
 
-.pw-grow{display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-2);padding:3px 0;}
-.pw-gcode{font-family:'Sora';font-weight:700;font-size:0.68rem;background:var(--chip-gray);color:var(--text-2);padding:2px 6px;border-radius:5px;flex:none;}
-.pw-gnote{font-size:9px;color:var(--text-3);margin-top:6px;}
+.pw-guide{width:100%;border-collapse:collapse;font-size:0.76rem;color:var(--text-2);}
+.pw-guide th{font-size:0.6rem;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-3);text-align:left;padding:0 3px 5px;border-bottom:1px solid var(--card-border);}
+.pw-guide td{padding:6px 3px;border-bottom:1px solid #f1f2f4;white-space:nowrap;}
+.pw-guide td:first-child{color:var(--text);font-weight:500;}
+.pw-guide tbody tr:last-child td{border-bottom:none;}
+.pw-gcode{display:inline-block;font-family:'Sora';font-weight:700;font-size:0.64rem;background:var(--chip-gray);color:var(--text-2);padding:2px 5px;border-radius:5px;margin-right:6px;}
+.pw-gnote{font-size:9px;color:var(--text-3);margin-top:8px;line-height:1.4;}
 
 div[data-baseweb="tab-list"]{gap:6px;border-bottom:none !important;}
 button[data-baseweb="tab"]{background:var(--chip-gray);border-radius:999px;padding:5px 15px !important;font-family:'Sora';font-weight:600;color:var(--text-2);min-height:0;}
@@ -436,13 +440,16 @@ def render_guide(p_throws):
     for code, name, spd, az_hint, ax_hint in GUIDE_ROWS:
         ax_disp = _flip_ax(ax_hint) if is_left else ax_hint
         rows += (
-            f'<div class="pw-grow"><span class="pw-gcode">{code}</span>'
-            f'<span>{name} · {spd} · {az_hint} · ax{ax_disp}</span></div>'
+            f'<tr><td><span class="pw-gcode">{code}</span>{name}</td>'
+            f'<td>{spd}</td><td>{az_hint}</td><td>{ax_disp}</td></tr>'
         )
     side = "좌완" if is_left else "우완"
     other = "우완" if is_left else "좌완"
     st.markdown(
-        rows + f'<div class="pw-gnote">※ ax 방향은 {side} 기준 · {other}은 좌우 반대</div>',
+        '<table class="pw-guide"><thead><tr>'
+        '<th>구종</th><th>구속</th><th>수직 az</th><th>수평 ax</th>'
+        f'</tr></thead><tbody>{rows}</tbody></table>'
+        f'<div class="pw-gnote">※ 수평 ax는 {side} 기준 · {other}은 +/− 반대</div>',
         unsafe_allow_html=True,
     )
 
