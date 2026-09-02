@@ -146,10 +146,10 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 .pw-fmag span{display:block;height:100%;border-radius:999px;}
 .pw-fdesc{font-size:0.78rem;line-height:1.55;color:var(--text-3);margin:0;}
 
-.pw-guide{width:100%;border-collapse:collapse;font-size:0.76rem;color:var(--text-2);}
+.pw-guide{width:100%;table-layout:fixed;border-collapse:collapse;font-size:0.76rem;color:var(--text-2);}
 .pw-guide th{font-size:0.6rem;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-3);text-align:left;padding:0 3px 5px;border-bottom:1px solid var(--card-border);}
-.pw-guide td{padding:6px 3px;border-bottom:1px solid #f1f2f4;white-space:nowrap;}
-.pw-guide td:first-child{color:var(--text);font-weight:500;}
+.pw-guide td{padding:6px 3px;border-bottom:1px solid #f1f2f4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pw-guide td:first-child{color:var(--text);font-weight:500;white-space:normal;}
 .pw-guide tbody tr:last-child td{border-bottom:none;}
 .pw-gcode{display:inline-block;font-family:'Sora';font-weight:700;font-size:0.64rem;background:var(--chip-gray);color:var(--text-2);padding:2px 5px;border-radius:5px;margin-right:6px;}
 .pw-gnote{font-size:9px;color:var(--text-3);margin-top:8px;line-height:1.4;}
@@ -487,17 +487,24 @@ def render_guide(p_throws):
     rows = ""
     for code, name, spd, az_hint, ax_hint in GUIDE_ROWS:
         ax_disp = _flip_ax(ax_hint) if is_left else ax_hint
+        _, ref_ax, ref_az = PITCH_REF[code]
+        ref_ax_disp = -ref_ax if is_left else ref_ax
         rows += (
             f'<tr><td><span class="pw-gcode">{code}</span>{name}</td>'
-            f'<td>{spd}</td><td>{az_hint}</td><td>{ax_disp}</td></tr>'
+            f'<td>{spd}</td>'
+            f'<td>{az_hint} ({ref_az:+.0f})</td>'
+            f'<td>{ax_disp} ({ref_ax_disp:+.0f})</td></tr>'
         )
     side = "좌완" if is_left else "우완"
     other = "우완" if is_left else "좌완"
     st.markdown(
-        '<table class="pw-guide"><thead><tr>'
-        '<th>구종</th><th>구속</th><th>수직 az</th><th>수평 ax</th>'
+        '<table class="pw-guide"><colgroup>'
+        '<col style="width:22%"><col style="width:22%"><col style="width:28%"><col style="width:28%">'
+        '</colgroup><thead><tr>'
+        '<th>구종</th><th>구속 (mph)</th><th>수직 az</th><th>수평 ax</th>'
         f'</tr></thead><tbody>{rows}</tbody></table>'
-        f'<div class="pw-gnote">※ 수평 ax는 {side} 기준 · {other}은 +/− 반대</div>',
+        f'<div class="pw-gnote">괄호 안은 슬라이더에 넣어볼 대략적인 az·ax 값(실제 예측은 17개 피처 전체로 계산) · '
+        f'수평 ax는 {side} 기준 · {other}은 +/− 반대</div>',
         unsafe_allow_html=True,
     )
 
