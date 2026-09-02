@@ -8,7 +8,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 try:
-    from pybaseball import statcast
+    from pybaseball import statcast, cache as pybaseball_cache
+    pybaseball_cache.enable()  # 일별 하위 요청을 캐시해 다운로드 중 실패해도 재시도 비용을 줄인다
     PYBASEBALL_AVAILABLE = True
 except ImportError:
     PYBASEBALL_AVAILABLE = False
@@ -16,10 +17,15 @@ except ImportError:
 
 DATA_DIR     = os.path.join(os.path.dirname(__file__), '..', 'data')
 MODEL_DIR    = os.path.join(os.path.dirname(__file__), '..', 'model')
-RAW_CSV      = os.path.join(DATA_DIR,  'statcast_2024.csv')
-TEST_CSV     = os.path.join(DATA_DIR,  'statcast_2025.csv')
 SCALER_PATH  = os.path.join(MODEL_DIR, 'scaler.pkl')
 ENCODER_PATH = os.path.join(MODEL_DIR, 'label_encoder.pkl')
+
+# 학습에 사용할 시즌별 (시작일, 종료일). 완결된 시즌만 포함한다 — 진행 중인
+# 시즌을 넣으면 그 시즌만 표본이 적어 구종 비율이 왜곡된다.
+TRAIN_SEASONS = [
+    ('2024', '2024-03-20', '2024-11-01'),
+    ('2025', '2025-03-27', '2025-11-01'),
+]
 
 os.makedirs(DATA_DIR,  exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -45,36 +51,27 @@ FEATURE_COLS = [
 LABEL_COL = 'pitch_type'
 
 
-def download_statcast(start_date='2024-03-20', end_date='2024-11-01'):
-    """학습용 Statcast 데이터를 다운로드한다. 캐시 파일이 있으면 바로 로드한다."""
-    if os.path.exists(RAW_CSV):
-        print(f"[정보] 캐시 파일 로드: {RAW_CSV}")
-        return pd.read_csv(RAW_CSV, low_memory=False)
+def download_statcast(year, start_date, end_date):
+    """해당 시즌의 Statcast 데이터를 다운로드한다. 캐시 파일이 있으면 바로 로드한다."""
+    cache_path = os.path.join(DATA_DIR, f'statcast_{year}.csv')
+    if os.path.exists(cache_path):
+        print(f"[정보] 캐시 파일 로드: {cache_path}")
+        return pd.read_csv(cache_path, low_memory=False)
 
     if not PYBASEBALL_AVAILABLE:
         raise RuntimeError("pybaseball이 없어 데이터를 다운로드할 수 없습니다.")
 
     print(f"[정보] 다운로드 중: {start_date} ~ {end_date}")
     df = statcast(start_dt=start_date, end_dt=end_date)
-    df.to_csv(RAW_CSV, index=False)
-    print(f"[정보] 저장 완료: {RAW_CSV}  ({len(df):,}행)")
+    df.to_csv(cache_path, index=False)
+    print(f"[정보] 저장 완료: {cache_path}  ({len(df):,}행)")
     return df
 
 
-def download_statcast_2025(start_date='2025-03-27', end_date='2025-11-01'):
-    """테스트용 2025 시즌 데이터를 다운로드한다. 캐시 파일이 있으면 바로 로드한다."""
-    if os.path.exists(TEST_CSV):
-        print(f"[정보] 2025 캐시 파일 로드: {TEST_CSV}")
-        return pd.read_csv(TEST_CSV, low_memory=False)
-
-    if not PYBASEBALL_AVAILABLE:
-        raise RuntimeError("pybaseball이 없어 데이터를 다운로드할 수 없습니다.")
-
-    print(f"[정보] 2025 데이터 다운로드 중: {start_date} ~ {end_date}")
-    df = statcast(start_dt=start_date, end_dt=end_date)
-    df.to_csv(TEST_CSV, index=False)
-    print(f"[정보] 저장 완료: {TEST_CSV}  ({len(df):,}행)")
-    return df
+def download_all_seasons(seasons=TRAIN_SEASONS):
+    """TRAIN_SEASONS에 지정된 시즌들을 모두 다운로드해 하나로 합친다."""
+    dfs = [download_statcast(year, start, end) for year, start, end in seasons]
+    return pd.concat(dfs, ignore_index=True)
 
 
 def filter_and_clean(df):
@@ -119,10 +116,9 @@ def normalize_features(X_train, X_val, X_test):
     return X_train, X_val, X_test, scaler
 
 
-def load_data(start_date='2024-03-20', end_date='2024-11-01',
-              val_ratio=0.10, test_ratio=0.10, random_state=42):
+def load_data(seasons=TRAIN_SEASONS, val_ratio=0.10, test_ratio=0.10, random_state=42):
     """다운로드부터 정규화까지 전체 전처리 파이프라인을 실행한다."""
-    df = download_statcast(start_date, end_date)
+    df = download_all_seasons(seasons)
     df = filter_and_clean(df)
 
     X = df[FEATURE_COLS].values.astype(np.float32)
