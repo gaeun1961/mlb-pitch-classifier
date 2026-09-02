@@ -611,9 +611,9 @@ def render_paths(inp, p_throws):
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-    # 상단뷰: 좌우를 가로축, 거리를 세로축으로 (위에서 내려다본 시점, 홈플레이트가 위쪽)
+    # 상단뷰: 위에서 내려다본 시점. y축을 뒤집어(홈플레이트 아래·투수판 위) 로케이션
+    # 차트와 같은 "주심 시점" 좌우 방향이 되게 한다.
     fig2 = go.Figure()
-    # 거리 기준 요소: 투수판(y≈0) · 좌우 타석(홈플레이트 옆) · 스트라이크존
     fig2.add_shape(type="rect", x0=0.83, x1=5, y0=PITCH_DIST - 3, y1=PITCH_DIST + 1.5,
                    fillcolor="rgba(140,143,152,0.08)", line_width=0, layer="below")
     fig2.add_shape(type="rect", x0=-5, x1=-0.83, y0=PITCH_DIST - 3, y1=PITCH_DIST + 1.5,
@@ -621,7 +621,7 @@ def render_paths(inp, p_throws):
     fig2.add_shape(type="line", x0=-1, x1=1, y0=0, y1=0, line=dict(color=ZONE_LINE, width=5))
     fig2.add_shape(type="rect", x0=-0.83, x1=0.83, y0=PITCH_DIST - 1.7, y1=PITCH_DIST,
                    line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
-    fig2.add_annotation(x=0, y=0, yshift=11, text="투수판", showarrow=False,
+    fig2.add_annotation(x=0, y=0, yshift=-12, text="투수판", showarrow=False,
                         font=dict(size=9, color=AXIS_TEXT))
     fig2.add_annotation(x=0, y=PITCH_DIST + 3, text="타석 · 홈플레이트", showarrow=False,
                         font=dict(size=9, color=AXIS_TEXT))
@@ -633,9 +633,10 @@ def render_paths(inp, p_throws):
         height=440, margin=dict(l=40, r=10, t=10, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft) · 상단뷰', range=[-4, 4], gridcolor=GRID, zeroline=False),
-        yaxis=dict(title='거리 (ft) · 투수판 0 → 홈플레이트 60.5',
-                   range=[-4, PITCH_DIST + 6], gridcolor=GRID, zeroline=False),
+        xaxis=dict(title='좌우 (ft) · 상단뷰 (주심 시점)', range=[-4, 4], gridcolor=GRID,
+                   zeroline=False),
+        yaxis=dict(title='거리 (ft) · 아래 홈플레이트 → 위 투수판',
+                   range=[PITCH_DIST + 6, -4], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
     st.caption("회색 사각형 = 홈플레이트 스트라이크존 · 빨간 점 = 릴리스·플레이트 통과 지점")
