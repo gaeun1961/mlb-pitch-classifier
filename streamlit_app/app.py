@@ -155,6 +155,10 @@ div[role="radiogroup"] > label{background:var(--chip-gray);border:1px solid var(
 div[role="radiogroup"] > label:has(input:checked){background:var(--text);border-color:var(--text);}
 div[role="radiogroup"] > label:has(input:checked) div{color:#fff;}
 div[role="radiogroup"] > label > div:first-child{display:none;}
+
+/* 입력창(텍스트·날짜·셀렉트) 외곽선 — 흰 배경에서 안 보이던 것 */
+div[data-baseweb="input"],div[data-baseweb="select"]>div{border:1px solid var(--card-border) !important;border-radius:8px !important;background:#fff !important;}
+div[data-baseweb="input"]:focus-within,div[data-baseweb="select"]>div:focus-within{border-color:var(--accent) !important;}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -751,11 +755,24 @@ def render_shap_panel(attribution, conf, label, explanation):
 with st.sidebar:
     st.markdown(LOGO_HTML, unsafe_allow_html=True)
 
-    st.markdown('<div class="pw-label">입력 방식</div>', unsafe_allow_html=True)
-    input_mode = st.radio(
-        "입력 방식", ["직접 조작", "투수 검색"],
-        horizontal=True, label_visibility="collapsed",
-    )
+    _c_mode, _c_hand = st.columns(2)
+    with _c_mode:
+        st.markdown('<div class="pw-label">입력 방식</div>', unsafe_allow_html=True)
+        input_mode = st.radio(
+            "입력 방식", ["직접 조작", "투수 검색"],
+            horizontal=True, label_visibility="collapsed",
+        )
+    with _c_hand:
+        st.markdown('<div class="pw-label">투구 손</div>', unsafe_allow_html=True)
+        hand = st.radio(
+            "투구 손", options=['R', 'L'],
+            format_func=lambda v: '우완 (R)' if v == 'R' else '좌완 (L)',
+            horizontal=True, key='hand', label_visibility="collapsed",
+            disabled=(input_mode != "직접 조작"),
+            help=None if input_mode == "직접 조작" else "투수 검색 시 데이터에서 자동 반영됩니다.",
+        )
+    if input_mode == "직접 조작":
+        st.session_state.p_throws = hand
     _mode_changed = st.session_state.get("_prev_mode") != input_mode
     st.session_state["_prev_mode"] = input_mode
     st.markdown("---")
@@ -909,16 +926,6 @@ with st.sidebar:
                         df = df.head(MAX_DATE_ONLY_ROWS)
                     render_pitch_mix(df)
                     select_and_predict_from_df(df)
-
-    st.markdown("---")
-    st.markdown('<div class="pw-label">투구 손</div>', unsafe_allow_html=True)
-    st.radio(
-        "투구 손", options=['R', 'L'],
-        format_func=lambda v: '우완 (R)' if v == 'R' else '좌완 (L)',
-        horizontal=True, key='p_throws', label_visibility="collapsed",
-        disabled=(input_mode != "직접 조작"),
-        help=None if input_mode == "직접 조작" else "실제 투구 데이터에서 자동으로 반영됩니다.",
-    )
 
     if input_mode == "직접 조작":
         st.markdown("---")
