@@ -634,6 +634,9 @@ def render_movement(inp):
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강) · {ctx}")
+    st.caption("⚠️ 회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 이 차트에 없는 "
+               "회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 "
+               "떨어져 보일 수 있습니다.")
 
 
 def render_strikezone(inp, clickable=False):
@@ -986,6 +989,13 @@ with st.sidebar:
         spin = st.slider("스핀레이트 (rpm)", 1500.0, 3500.0,
                          float(st.session_state.inp['release_spin_rate']), 10.0,
                          help="높을수록 포심/커터 계열")
+        spin_axis = st.slider("회전축 (°)", 0.0, 360.0,
+                              float(st.session_state.inp['spin_axis']), 5.0,
+                              help="공이 회전하는 축의 방향(시계 방향, 0~360°). 무브먼트 차트의 "
+                                   "ax·az와 별개로 구종 판별에 큰 영향을 줌 — 2026시즌 실측 평균: "
+                                   "포심 215° · 싱커 225° · 체인지업 242° · 스플리터 238°"
+                                   "(패스트볼 계열이 210~245°에 몰림) · 커터 185° · "
+                                   "슬라이더 122°(선수마다 편차 큼) · 커브 44°(패스트볼과 거의 반대 방향)")
         ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, key="ax_slider",
                         help="스트라이크존을 클릭하면 이 값이 자동으로 맞춰집니다")
         az = st.slider("수직 무브먼트 (az)", -50.0, 15.0, step=0.5, key="az_slider",
@@ -1011,7 +1021,7 @@ with st.sidebar:
 
         inp = dict(SAMPLE_VALUES)
         inp.update({
-            'release_speed': spd, 'release_spin_rate': spin,
+            'release_speed': spd, 'release_spin_rate': spin, 'spin_axis': spin_axis,
             'release_extension': ext,
             'az': az, 'ax': ax_, 'vz0': vz0, 'vx0': vx0,
             'release_pos_x': rx, 'release_pos_z': rz, 'vy0': round(vy0, 2),
