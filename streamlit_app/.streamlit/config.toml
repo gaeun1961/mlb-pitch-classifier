@@ -5,3 +5,5 @@ backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#ffffff"
 textColor = "#0f1216"
 font = "sans serif"
+borderColor = "#c2c6cc"
+showWidgetBorder = true
