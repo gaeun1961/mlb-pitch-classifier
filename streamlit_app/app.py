@@ -527,7 +527,8 @@ def render_movement(inp):
 
 
 def render_strikezone(inp, clickable=False):
-    """정면(포수) 시점 로케이션. clickable이면 존을 클릭해 공 위치를 지정할 수 있다."""
+    """주심(포수 뒤)이 마운드를 바라본 시점. 회색 점 = 릴리스, 빨간 점 = 플레이트
+    통과 위치. clickable이면 존을 클릭해 공 위치를 지정할 수 있다."""
     st.markdown('<div class="pw-label">로케이션 · 스트라이크존</div>', unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
@@ -535,31 +536,41 @@ def render_strikezone(inp, clickable=False):
                   line=dict(color=ZONE_LINE, width=2),
                   fillcolor="rgba(138,143,152,0.06)", layer="below")
     if clickable:
-        # 투명 격자 = 클릭 히트타깃. 클릭하면 가장 가까운 격자점(≈0.1ft)이 선택된다.
-        gx, gy = np.meshgrid(np.arange(-1.6, 1.61, 0.1), np.arange(0.3, 4.71, 0.1))
+        # 옅은 격자 = 클릭 히트타깃(≈0.15ft 간격). 클릭하면 가장 가까운 점이 선택된다.
+        # 완전 투명 + hoverinfo='skip'이면 Plotly가 클릭 이벤트를 안 잡으므로 옅게라도 그린다.
+        gx, gy = np.meshgrid(np.arange(-1.8, 1.81, 0.15), np.arange(0.3, 4.81, 0.15))
         fig.add_trace(go.Scatter(x=gx.ravel(), y=gy.ravel(), mode='markers',
-                                 marker=dict(size=13, color='rgba(0,0,0,0)'), hoverinfo='skip'))
+                                 name='click', marker=dict(size=16, color='rgba(140,143,152,0.16)'),
+                                 hoverinfo='none'))
+    # 릴리스 지점(회색). plate_x/release_pos_x는 Statcast와 같은 포수·주심 시점 좌표
+    fig.add_trace(go.Scatter(
+        x=[inp['release_pos_x']], y=[inp['release_pos_z']], mode='markers',
+        marker=dict(color=GRAY, size=13, line=dict(color='white', width=1.5)),
+        hoverinfo='skip',
+    ))
+    fig.add_annotation(x=inp['release_pos_x'], y=inp['release_pos_z'], yshift=13,
+                       text="릴리스", showarrow=False, font=dict(size=9, color=AXIS_TEXT))
     fig.add_trace(go.Scatter(
         x=[inp['plate_x']], y=[inp['plate_z']], mode='markers',
         marker=dict(color=ACCENT_HEX, size=20, line=dict(color='white', width=1.5)),
         hoverinfo='skip',
     ))
     fig.update_layout(
-        height=340, margin=dict(l=40, r=10, t=10, b=32),
+        height=400, margin=dict(l=40, r=10, t=10, b=32),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=AXIS_TEXT, size=11), showlegend=False, dragmode=False,
-        xaxis=dict(title='좌우 (ft)', range=[-2, 2], gridcolor=GRID, zeroline=False,
-                   scaleanchor='y', fixedrange=True),
-        yaxis=dict(title='높이 (ft)', range=[0, 5], gridcolor=GRID, zeroline=False,
-                   fixedrange=True),
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
+        xaxis=dict(title='좌우 (ft) · 주심 시점', range=[-2.5, 2.5], gridcolor=GRID,
+                   zeroline=False, scaleanchor='y'),
+        yaxis=dict(title='높이 (ft)', range=[0, 7.5], gridcolor=GRID, zeroline=False),
     )
     if clickable:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False},
                         on_select="rerun", selection_mode="points", key="zone_click")
-        st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지")
+        st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지 · "
+                   "회색 점 = 릴리스 지점")
     else:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        st.caption("회색 사각형 = 평균 스트라이크존 · 빨간 점 = 이 투구의 플레이트 통과 위치")
+        st.caption("주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치")
 
 
 def render_paths(inp, p_throws):
