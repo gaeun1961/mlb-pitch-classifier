@@ -45,6 +45,14 @@ FEAT_KR = {
 
 PITCH_ORDER = ['FF', 'SI', 'SL', 'CU', 'CH', 'FC', 'FS']
 
+# 슬라이더 min/max. 실측 데이터(data/statcast_2026.csv.gz, 7개 구종·구속 40~110mph
+# 기준) 백분위수로 정한 것 — 여러 곳에서 같은 값을 써야 해서 상수로 뺐다.
+# az만 예외: 실제 az는 -50~0에 거의 다 들어가지만, 존 클릭 시 vz0과의 상쇄 때문에
+# 특정 높이에 정확히 도달하려면 (기본 설정 기준 존 하단만 해도) -190 근처까지 필요해
+# 훨씬 넓게 잡았다 — 클릭 없이 직접 만질 땐 -50 아래는 실제 MLB엔 없는 값이다.
+AZ_RANGE = (-220.0, 20.0)
+RX_RANGE = (-4.0, 4.0)
+
 # 무브먼트 차트 참조 클러스터용 구종별 대표 (구속, ax, az) — 가이드 테이블 기반 근사.
 # 예측된 점과 같은 식으로 유도 무브먼트(inch)로 변환해 배경에 깐다.
 # data/statcast_2026.csv.gz(61만 건, 우완 투수만) 실측 평균 — 예전엔 가이드 테이블 기반
@@ -284,10 +292,13 @@ def _apply_zone_click():
 
     - 좌우(ax): plate_x 식을 뒤집어 정확한 ax를 바로 구한다.
     - 높이(az): az가 vz0 = -3.0-0.15·az에도 연동된다는 걸 감안해, plate_z 식을
-      그대로 뒤집어 az를 직접 정확히 구한다. 존 위/아래 끝처럼 필요한 az가 슬라이더
-      범위(±50)를 넘는 경우에만 클램프하고, 그때는 클램프된 az를 고정값으로 두고
-      vz0을 다시 풀어 최대한 가깝게 맞춘다 — 정상 범위 안이면 슬라이더 값과 실제
-      궤적이 항상 정확히 일치한다.
+      그대로 뒤집어 az를 직접 정확히 구한다. 이 연동 때문에 az가 plate_z에 미치는
+      실질 영향이 매우 작아(전형적 t에서 az 1단위당 0.02ft 안팎), 존 안 어디든
+      정확히 도달하려면 실제 MLB az 범위(-50~0)를 한참 벗어나는 값이 필요할 수
+      있다 — AZ_RANGE를 넉넉히 잡아 두었다. 그래도 필요한 az가 슬라이더 범위를
+      넘는 경우(아주 빠른 구속·짧은 익스텐션 조합 등)에만 클램프하고, 그때는
+      클램프된 az를 고정값으로 두고 vz0을 다시 풀어 최대한 가깝게 맞춘다 — 정상
+      범위 안이면 슬라이더 값과 실제 궤적이 항상 정확히 일치한다.
     """
     sel = st.session_state.get("zone_click")
     if not sel:
@@ -313,13 +324,17 @@ def _apply_zone_click():
     ax = _snap((px - rx) / (0.2 * t + 0.5 * t * t), -30.0, 30.0)
 
     az_exact = (pz - rz + 3.0 * t) / (0.5 * t * t - 0.15 * t)
-    az = _snap(az_exact, -50.0, 15.0)
+    az = _snap(az_exact, *AZ_RANGE)
     # az가 정상 범위면 표준 공식(vz0 = -3.0-0.15az)이 이미 클릭 높이에 정확히 맞는다.
-    # 존 위/아래 끝을 클릭해 az가 클램프됐을 때만, 그 클램프된 az를 고정하고 vz0을
-    # 다시 풀어서 최대한 가깝게 맞춘다 — 어느 쪽이든 az 슬라이더 값과 실제 궤적이
-    # 항상 서로 일치한다.
+    # 존 위/아래 끝을 클릭해 az가 AZ_RANGE 밖으로 튀어(진짜 클램프) 나갈 때만, 그
+    # 클램프된 az를 고정하고 vz0을 다시 풀어서 최대한 가깝게 맞춘다 — 어느 쪽이든
+    # az 슬라이더 값과 실제 궤적이 항상 서로 일치한다.
+    # (0.5 step으로 반올림(_snap)된 오차만으로는 "클램프"로 치면 안 된다 — 그 정도
+    # 오차는 항상 있고, 그때마다 폴백으로 넘어가면 vz0이 [-14,3] 범위에 부당하게
+    # 잘려서 오히려 결과가 크게 어긋난다.)
+    clamped = az_exact < AZ_RANGE[0] or az_exact > AZ_RANGE[1]
     vz0 = round(-3.0 - 0.15 * az, 2)
-    if abs(az_exact - az) > 1e-6:
+    if clamped:
         vz0 = _snap((pz - rz - 0.5 * az * t * t) / t, -14.0, 3.0, step=0.01)
 
     st.session_state["ax_slider"] = ax
@@ -1039,8 +1054,8 @@ with st.sidebar:
     _cur_rx = float(st.session_state.get("rx_slider", SAMPLE_VALUES['release_pos_x']))
     if _manual and _mode_changed:
         st.session_state["ax_slider"] = _snap(st.session_state.inp['ax'], -30.0, 30.0)
-        st.session_state["az_slider"] = _snap(st.session_state.inp['az'], -50.0, 15.0)
-        st.session_state["rx_slider"] = _snap(st.session_state.inp['release_pos_x'], -3.0, 3.0, 0.1)
+        st.session_state["az_slider"] = _snap(st.session_state.inp['az'], *AZ_RANGE)
+        st.session_state["rx_slider"] = _snap(st.session_state.inp['release_pos_x'], *RX_RANGE, 0.1)
         _cur_rx = st.session_state["rx_slider"]
     elif _manual and st.session_state.get("_sync_rx") is not None \
             and abs(_cur_rx - st.session_state["_sync_rx"]) > 1e-6:
@@ -1068,7 +1083,7 @@ with st.sidebar:
         if not _mode_changed and _sync_hand is not None and hand != _sync_hand:
             _mag = abs(_cur_rx) if abs(_cur_rx) > 0.2 else abs(SAMPLE_VALUES['release_pos_x'])
             st.session_state["rx_slider"] = _snap(_mag * (1.0 if hand == 'L' else -1.0),
-                                                  -3.0, 3.0, 0.1)
+                                                  *RX_RANGE, 0.1)
             st.session_state["ax_slider"] = _snap(-float(st.session_state["ax_slider"]),
                                                   -30.0, 30.0)
         st.session_state["_sync_hand"] = hand
@@ -1079,7 +1094,7 @@ with st.sidebar:
     if _manual:
         spd = st.slider("구속 (mph)", 60.0, 105.0, float(st.session_state.inp['release_speed']),
                         0.5, help="빠를수록 FF/FC 계열")
-        spin = st.slider("스핀레이트 (rpm)", 1500.0, 3500.0,
+        spin = st.slider("스핀레이트 (rpm)", 1000.0, 3500.0,
                          float(st.session_state.inp['release_spin_rate']), 10.0,
                          help="높을수록 포심/커터 계열")
         spin_axis = st.slider("회전축 (°)", 0.0, 360.0,
@@ -1091,15 +1106,16 @@ with st.sidebar:
                                    "슬라이더 122°(선수마다 편차 큼) · 커브 44°(패스트볼과 거의 반대 방향)")
         ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, key="ax_slider",
                         help="스트라이크존을 클릭하면 이 값이 자동으로 맞춰집니다")
-        az = st.slider("수직 무브먼트 (az)", -50.0, 15.0, step=0.5, key="az_slider",
-                       help="양수=포심(떠오름), 음수=싱커(가라앉음) · "
-                            "스트라이크존을 클릭하면 이 값이 자동으로 맞춰집니다")
-        ext = st.slider("릴리스 익스텐션 (ft)", 5.0, 7.5,
+        az = st.slider("수직 무브먼트 (az)", *AZ_RANGE, step=0.5, key="az_slider",
+                       help="양수=포심(떠오름), 음수=싱커(가라앉음) · 실제 MLB 투구는 거의 "
+                            "-50~0에 몰려 있음 — 그보다 아래는 스트라이크존을 클릭했을 때 "
+                            "그 위치에 정확히 도달하기 위한 값이라 실측 범위 밖일 수 있음")
+        ext = st.slider("릴리스 익스텐션 (ft)", 4.5, 8.0,
                         float(st.session_state.inp['release_extension']), 0.1,
                         help="릴리스 지점이 홈플레이트에 얼마나 가까운지")
-        rx = st.slider("릴리스 좌우 (ft)", -3.0, 3.0, step=0.1, key="rx_slider",
+        rx = st.slider("릴리스 좌우 (ft)", *RX_RANGE, step=0.1, key="rx_slider",
                        help="투구 손과 자동 연동 · 음수 = 우완(1루쪽), 양수 = 좌완(3루쪽)")
-        rz = st.slider("릴리스 높이 (ft)", 4.0, 7.0,
+        rz = st.slider("릴리스 높이 (ft)", 3.5, 7.2,
                        float(st.session_state.inp['release_pos_z']), 0.1,
                        help="릴리스 암슬롯 높이")
 
