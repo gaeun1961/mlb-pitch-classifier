@@ -68,6 +68,28 @@ GUIDE_ROWS = [
     ('FS', '스플리터', '83-90', '−−', '−'),
 ]
 
+# 구종별 정밀도·재현율·F1. 배포 모델(2024~2025 학습)을 학습 때 전혀 보지 못한
+# 2026시즌 데이터(549,360건, data/statcast_2026.csv.gz)로 평가한 실측값 — 위
+# 요약 지표(Weighted F1 0.93)는 2024~2025 자체의 무작위 분할 테스트셋 기준이라
+# 서로 직접 비교하면 안 된다(진짜 미래 시즌 검증이라 더 엄격해 수치가 더 낮다).
+CLASS_METRICS = {
+    'FF': (0.953, 0.974, 0.964), 'SI': (0.945, 0.933, 0.939),
+    'SL': (0.846, 0.884, 0.865), 'CU': (0.938, 0.908, 0.923),
+    'CH': (0.885, 0.878, 0.882), 'FC': (0.801, 0.745, 0.772),
+    'FS': (0.684, 0.638, 0.660),
+}
+
+# 전역 특성 중요도 = 예측 클래스 확률에 대한 gradient×input(오른쪽 SHAP 인사이트와
+# 같은 방식)을 위 2026시즌 평가셋 6만 건에 평균 낸 값. "이번 한 번의 예측 기여도"가
+# 아니라 모델 전반의 평균적인 중요도 순위다. 비중(%)으로 정규화해 저장.
+GLOBAL_IMPORTANCE = [
+    ('spin_axis', 20.6), ('release_pos_x', 10.1), ('pfx_x', 9.2),
+    ('release_spin_rate', 9.1), ('ax', 9.1), ('pfx_z', 8.1), ('az', 5.4),
+    ('release_pos_z', 4.9), ('vx0', 4.6), ('release_extension', 3.7),
+    ('release_speed', 3.6), ('vy0', 2.8), ('effective_speed', 2.4),
+    ('vz0', 1.9), ('plate_z', 1.8), ('ay', 1.5), ('plate_x', 1.3),
+]
+
 # ── 디자인 토큰 · 라이트 테마 CSS ────────────────────────
 # Streamlit은 매 rerun마다 DOM을 새로 만들므로 이 <style>도 매번 재주입돼야 한다.
 # 문자열은 모듈 상수라 재생성 비용은 없다(= 성능 병목 아님).
@@ -117,6 +139,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
 div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 
 .pw-label{font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--label);margin-bottom:10px;}
+.pw-help{display:inline-block;cursor:help;font-weight:700;color:var(--text-3);border:1px solid var(--card-border);border-radius:50%;width:14px;height:14px;line-height:13px;text-align:center;font-size:9px;margin-left:4px;text-transform:none;letter-spacing:0;vertical-align:middle;}
 
 .pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
 .pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
@@ -593,8 +616,12 @@ def render_movement(inp):
     세로는 Statcast 관례(위 = 라이징/포심, 아래 = 드롭/커브). 배경 회색 점은 실제
     데이터 로드 시 그 분포, 아니면 세션 예측 이력. 예측 점·클러스터·이력은 모두
     같은 식(_pfx_inches)이라 서로 비교 가능하다."""
-    st.markdown('<div class="pw-label">무브먼트 차트 (유도 무브먼트, in)</div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="pw-label">무브먼트 차트 (유도 무브먼트, in) '
+        '<span class="pw-help" title="회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 '
+        '이 차트에 없는 회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 '
+        '떨어져 보일 수 있습니다.">❓</span></div>',
+        unsafe_allow_html=True)
     bg = st.session_state.get('movement_bg')
     hist = st.session_state.history
     label = st.session_state.label
@@ -648,15 +675,21 @@ def render_movement(inp):
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강) · {ctx}")
-    st.caption("⚠️ 회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 이 차트에 없는 "
-               "회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 "
-               "떨어져 보일 수 있습니다.")
 
 
 def render_strikezone(inp, clickable=False):
     """주심(포수 뒤)이 마운드를 바라본 시점. 회색 점 = 릴리스, 빨간 점 = 플레이트
     통과 위치. clickable이면 존을 클릭해 공 위치를 지정할 수 있다."""
-    st.markdown('<div class="pw-label">로케이션 · 스트라이크존</div>', unsafe_allow_html=True)
+    tip = (
+        "좌우(ax)·수직(az) 무브먼트 슬라이더가 클릭한 위치에 실제로 도달하도록 역산되어 "
+        "바뀝니다 — 구종이 무엇이 되는지는 신경 쓰지 않고, 그 위치에 맞는 움직임 값을 그대로 "
+        "반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다."
+        if clickable else
+        "주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치"
+    )
+    st.markdown(
+        f'<div class="pw-label">로케이션 · 스트라이크존 <span class="pw-help" title="{tip}">❓</span></div>',
+        unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
     fig.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5,
@@ -693,14 +726,9 @@ def render_strikezone(inp, clickable=False):
     if clickable:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False},
                         on_select="rerun", selection_mode="points", key="zone_click")
-        st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지 · "
-                   "회색 점 = 릴리스 지점")
-        st.caption("좌우(ax)·수직(az) 무브먼트 슬라이더가 클릭한 위치에 실제로 도달하도록 "
-                   "역산되어 바뀝니다 — 구종이 무엇이 되는지는 신경 쓰지 않고, 그 위치에 맞는 "
-                   "움직임 값을 그대로 반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다.")
+        st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지")
     else:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        st.caption("주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치")
 
 
 def render_paths(inp, p_throws):
@@ -783,6 +811,52 @@ def render_model_info():
         "MLB Statcast 2024~2025 정규시즌 데이터로 학습 · Weighted F1 0.93 · "
         "모델은 lru_cache로 프로세스당 1회만 로드됩니다."
     )
+
+    st.divider()
+    st.markdown(
+        '<div class="pw-label">구종별 정밀도 · 재현율 · F1 '
+        '<span class="pw-help" title="2024~2025로 학습한 모델을 학습 때 전혀 보지 못한 2026시즌 '
+        '데이터(549,360건)에 평가한 실측값입니다. 위 요약 지표는 2024~2025 자체의 무작위 분할 '
+        '테스트셋 기준이라 서로 직접 비교하지 마세요 — 진짜 미래 시즌 검증이라 여기 수치가 더 '
+        '낮습니다.">❓</span></div>',
+        unsafe_allow_html=True)
+    rows = "".join(
+        f'<tr><td><span class="pw-gcode">{code}</span>{PITCH_NAMES.get(code, code)}</td>'
+        f'<td>{p:.2f}</td><td>{r:.2f}</td><td>{f1:.2f}</td></tr>'
+        for code, (p, r, f1) in CLASS_METRICS.items()
+    )
+    st.markdown(
+        '<table class="pw-guide"><colgroup>'
+        '<col style="width:34%"><col style="width:22%"><col style="width:22%"><col style="width:22%">'
+        '</colgroup><thead><tr>'
+        '<th>구종</th><th>정밀도</th><th>재현율</th><th>F1</th>'
+        f'</tr></thead><tbody>{rows}</tbody></table>',
+        unsafe_allow_html=True)
+    st.caption("2026시즌(미학습) 데이터 기준 · FC·FS가 상대적으로 약함")
+
+    st.divider()
+    st.markdown(
+        '<div class="pw-label">전역 특성 중요도 '
+        '<span class="pw-help" title="오른쪽 SHAP 인사이트는 이번 한 번의 예측에 대한 기여도이고, '
+        '이 차트는 2026시즌 평가셋 전체에서 평균 낸 모델 전반의 평균적인 중요도 순위입니다.">'
+        '❓</span></div>',
+        unsafe_allow_html=True)
+    names = [FEAT_KR.get(f, f) for f, _ in reversed(GLOBAL_IMPORTANCE)]
+    vals = [v for _, v in reversed(GLOBAL_IMPORTANCE)]
+    fig = go.Figure(go.Bar(
+        x=vals, y=names, orientation='h', marker_color=GRAY,
+        text=[f'{v:.0f}%' for v in vals], textposition='outside',
+    ))
+    fig.update_layout(
+        height=460, margin=dict(l=10, r=30, t=10, b=30),
+        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
+        xaxis=dict(title='평균 기여도 비중 (%)', range=[0, max(vals) * 1.2],
+                   gridcolor=GRID, zeroline=False),
+        yaxis=dict(gridcolor='rgba(0,0,0,0)'),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    st.caption("gradient×input 기여도의 절댓값을 평가셋 전체에 평균 · 회전축(spin_axis)이 가장 크게 기여")
 
 
 def render_pitch_mix(df):
@@ -1200,8 +1274,6 @@ with left:
             with st.container(border=True):
                 render_prob_dist(proba, label)
             with st.container(border=True):
-                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
-            with st.container(border=True):
                 render_movement(inp)
         else:
             with st.container(border=True):
@@ -1210,6 +1282,9 @@ with left:
 
     with tab_traj:
         summary_card()
+        if label and proba:
+            with st.container(border=True):
+                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
         with st.container(border=True):
             render_paths(inp, st.session_state.p_throws)
 
