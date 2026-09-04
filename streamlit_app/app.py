@@ -140,7 +140,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 
 .pw-label{font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--label);margin-bottom:10px;}
 .pw-help{position:relative;display:inline-block;cursor:help;font-weight:700;color:var(--text-3);border:1px solid var(--card-border);border-radius:50%;width:14px;height:14px;line-height:13px;text-align:center;font-size:9px;margin-left:4px;text-transform:none;letter-spacing:0;vertical-align:middle;outline:none;}
-.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:135%;left:0;width:260px;max-width:70vw;padding:9px 11px;border-radius:8px;background:#1c1f24;color:#f2f3f5;font-size:11px;font-weight:400;line-height:1.45;text-align:left;text-transform:none;letter-spacing:0;white-space:normal;box-shadow:0 6px 18px rgba(0,0,0,0.2);opacity:0;visibility:hidden;transition:opacity .12s ease;pointer-events:none;}
+.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:135%;left:0;width:280px;max-width:70vw;padding:11px 13px;border-radius:8px;background:#5b6068;color:#ffffff;font-size:13px;font-weight:400;line-height:1.5;text-align:left;text-transform:none;letter-spacing:0;white-space:normal;box-shadow:0 6px 18px rgba(0,0,0,0.2);opacity:0;visibility:hidden;transition:opacity .12s ease;pointer-events:none;}
 .pw-help:hover::after,.pw-help:focus::after{opacity:1;visibility:visible;}
 
 .pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
@@ -1178,7 +1178,10 @@ with st.sidebar:
 
                 is_fav = any(f['id'] == chosen['id'] for f in st.session_state.favorites)
                 c_star.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
-                if c_star.button("⭐" if is_fav else "☆", key=f"fav_toggle_{chosen['id']}",
+                # 이모지(⭐/☆) 글리프가 없는 폰트/브라우저에서 빈 버튼으로 보이는 문제가
+                # 있어, Streamlit에 내장된 Material Symbols 아이콘으로 대체한다.
+                if c_star.button("", icon=":material/star:" if is_fav else ":material/star_border:",
+                                  key=f"fav_toggle_{chosen['id']}",
                                   help="즐겨찾기 해제" if is_fav else "즐겨찾기에 추가"):
                     toggle_favorite(chosen['id'], chosen['name'], choice)
                     st.rerun()
