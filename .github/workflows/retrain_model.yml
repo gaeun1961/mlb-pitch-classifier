@@ -1,8 +1,12 @@
 name: Retrain Model
 
-# 수동 실행 전용 — 새 모델이 이전보다 항상 더 낫다는 보장이 없어서(2024+2025 재학습 때
-# 정확도가 94.2%→93.36%로 내려간 전례가 있음), 자동 배포 대신 PR로 올려 리뷰 후 병합한다.
+# 매월 1일(UTC 00:00 = KST 09:00) 지난달까지 누적된 데이터로 자동 재학습하고,
+# 수동 실행도 가능하다. 새 모델이 이전보다 항상 더 낫다는 보장이 없어서(2024+2025
+# 재학습 때 정확도가 94.2%→93.36%로 내려간 전례가 있음) 자동 배포는 하지 않고
+# PR로 올려 리뷰 후 병합한다.
 on:
+  schedule:
+    - cron: '0 0 1 * *'
   workflow_dispatch: {}
 
 permissions:
@@ -53,7 +57,7 @@ jobs:
 
           METRICS=$(cat desktop_app/results/metrics.md 2>/dev/null || echo "메트릭 요약을 찾을 수 없습니다 — 실행 로그를 확인하세요.")
           gh pr create --title "🤖 자동 재학습: 모델 갱신 $(date -u +%Y-%m-%d)" --body "$(cat <<EOF
-          매뉴얼 트리거로 실행된 재학습 결과입니다. 병합 전에 아래 지표와 confusion_matrix.png/loss_accuracy.png를 검토해주세요 — 새 모델이 항상 더 낫다는 보장은 없습니다 (README/앱 캡션의 정확도 문구도 필요시 함께 갱신).
+          ${{ github.event_name == 'schedule' && '매월 1일 자동 실행(지난달까지 누적 데이터 포함)된' || '수동 트리거로 실행된' }} 재학습 결과입니다. 병합 전에 아래 지표와 confusion_matrix.png/loss_accuracy.png를 검토해주세요 — 새 모델이 항상 더 낫다는 보장은 없습니다 (README/앱 캡션의 정확도 문구도 필요시 함께 갱신).
 
           $METRICS
           EOF

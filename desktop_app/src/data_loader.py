@@ -20,8 +20,12 @@ MODEL_DIR    = os.path.join(os.path.dirname(__file__), '..', 'model')
 SCALER_PATH  = os.path.join(MODEL_DIR, 'scaler.pkl')
 ENCODER_PATH = os.path.join(MODEL_DIR, 'label_encoder.pkl')
 
-# 학습에 사용할 시즌별 (시작일, 종료일). 완결된 시즌만 포함한다 — 진행 중인
-# 시즌을 넣으면 그 시즌만 표본이 적어 구종 비율이 왜곡된다.
+# 매일 GitHub Actions 파이프라인(scripts/fetch_daily.py)이 쌓아 두는, 진행 중인
+# 시즌 데이터. 매월 1일 자동 재학습 때 지난달까지 누적된 분량을 함께 학습에 넣는다.
+CURRENT_SEASON_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'statcast_2026.csv.gz')
+
+# 학습에 사용할 완결 시즌별 (시작일, 종료일). 진행 중인 2026시즌은 CURRENT_SEASON_PATH로
+# 별도 합류시킨다 — 이 목록엔 넣지 않는다.
 TRAIN_SEASONS = [
     ('2024', '2024-03-20', '2024-11-01'),
     ('2025', '2025-03-27', '2025-11-01'),
@@ -68,9 +72,20 @@ def download_statcast(year, start_date, end_date):
     return df
 
 
+def load_current_season():
+    """일일 파이프라인이 쌓아온 진행 중 시즌 데이터를 불러온다. 없으면 None."""
+    if not os.path.exists(CURRENT_SEASON_PATH):
+        return None
+    print(f"[정보] 진행 중 시즌 데이터 포함: {CURRENT_SEASON_PATH}")
+    return pd.read_csv(CURRENT_SEASON_PATH, compression='gzip', low_memory=False)
+
+
 def download_all_seasons(seasons=TRAIN_SEASONS):
-    """TRAIN_SEASONS에 지정된 시즌들을 모두 다운로드해 하나로 합친다."""
+    """TRAIN_SEASONS에 지정된 완결 시즌 + 진행 중 시즌 누적분을 모두 합친다."""
     dfs = [download_statcast(year, start, end) for year, start, end in seasons]
+    current = load_current_season()
+    if current is not None:
+        dfs.append(current)
     return pd.concat(dfs, ignore_index=True)
 
 
