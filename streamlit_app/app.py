@@ -139,7 +139,9 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
 div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
 
 .pw-label{font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--label);margin-bottom:10px;}
-.pw-help{display:inline-block;cursor:help;font-weight:700;color:var(--text-3);border:1px solid var(--card-border);border-radius:50%;width:14px;height:14px;line-height:13px;text-align:center;font-size:9px;margin-left:4px;text-transform:none;letter-spacing:0;vertical-align:middle;}
+.pw-help{position:relative;display:inline-block;cursor:help;font-weight:700;color:var(--text-3);border:1px solid var(--card-border);border-radius:50%;width:14px;height:14px;line-height:13px;text-align:center;font-size:9px;margin-left:4px;text-transform:none;letter-spacing:0;vertical-align:middle;outline:none;}
+.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:135%;left:0;width:260px;max-width:70vw;padding:9px 11px;border-radius:8px;background:#1c1f24;color:#f2f3f5;font-size:11px;font-weight:400;line-height:1.45;text-align:left;text-transform:none;letter-spacing:0;white-space:normal;box-shadow:0 6px 18px rgba(0,0,0,0.2);opacity:0;visibility:hidden;transition:opacity .12s ease;pointer-events:none;}
+.pw-help:hover::after,.pw-help:focus::after{opacity:1;visibility:visible;}
 
 .pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
 .pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
@@ -618,7 +620,7 @@ def render_movement(inp):
     같은 식(_pfx_inches)이라 서로 비교 가능하다."""
     st.markdown(
         '<div class="pw-label">무브먼트 차트 (유도 무브먼트, in) '
-        '<span class="pw-help" title="회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 '
+        '<span class="pw-help" tabindex="0" data-tip="회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 '
         '이 차트에 없는 회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 '
         '떨어져 보일 수 있습니다.">❓</span></div>',
         unsafe_allow_html=True)
@@ -688,7 +690,7 @@ def render_strikezone(inp, clickable=False):
         "주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치"
     )
     st.markdown(
-        f'<div class="pw-label">로케이션 · 스트라이크존 <span class="pw-help" title="{tip}">❓</span></div>',
+        f'<div class="pw-label">로케이션 · 스트라이크존 <span class="pw-help" tabindex="0" data-tip="{tip}">❓</span></div>',
         unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
@@ -815,7 +817,7 @@ def render_model_info():
     st.divider()
     st.markdown(
         '<div class="pw-label">구종별 정밀도 · 재현율 · F1 '
-        '<span class="pw-help" title="2024~2025로 학습한 모델을 학습 때 전혀 보지 못한 2026시즌 '
+        '<span class="pw-help" tabindex="0" data-tip="2024~2025로 학습한 모델을 학습 때 전혀 보지 못한 2026시즌 '
         '데이터(549,360건)에 평가한 실측값입니다. 위 요약 지표는 2024~2025 자체의 무작위 분할 '
         '테스트셋 기준이라 서로 직접 비교하지 마세요 — 진짜 미래 시즌 검증이라 여기 수치가 더 '
         '낮습니다.">❓</span></div>',
@@ -837,7 +839,7 @@ def render_model_info():
     st.divider()
     st.markdown(
         '<div class="pw-label">전역 특성 중요도 '
-        '<span class="pw-help" title="오른쪽 SHAP 인사이트는 이번 한 번의 예측에 대한 기여도이고, '
+        '<span class="pw-help" tabindex="0" data-tip="오른쪽 SHAP 인사이트는 이번 한 번의 예측에 대한 기여도이고, '
         '이 차트는 2026시즌 평가셋 전체에서 평균 낸 모델 전반의 평균적인 중요도 순위입니다.">'
         '❓</span></div>',
         unsafe_allow_html=True)
