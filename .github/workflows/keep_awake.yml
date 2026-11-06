@@ -1,0 +1,39 @@
+name: Keep App Awake
+
+# Streamlit Cloud 무료 플랜은 일정 시간 접속이 없으면 앱을 재운다. 6시간마다 앱을 열어
+# sleep 화면이면 깨우기 버튼을 누르고, 앱 본문이 뜰 때까지 기다린다(scripts/wake_app.py).
+# 앱이 끝내 안 뜨면 job이 실패로 표시된다.
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch: {}
+
+env:
+  APP_URL: https://mlb-pitch-classifier-tgtrdgldkletpsw43j26sz.streamlit.app/
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Wake app
+        run: python scripts/wake_app.py
+
+      - name: Upload failure screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wake-failure
+          path: wake_failure.png
+          if-no-files-found: ignore
