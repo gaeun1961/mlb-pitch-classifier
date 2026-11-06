@@ -271,8 +271,10 @@ _PFX0 = [sum(c) / len(c)
 
 
 def _pfx_inches(spd, ax, az, ext=6.2):
-    """앱 궤적식 유도 무브먼트를 재중심화해 inch로. 예측 점·참조 클러스터·이력이 모두
-    이 함수를 거쳐 같은 좌표계(위 = 라이징/포심, 아래 = 드롭/커브)를 쓴다."""
+    """앱 궤적식(ax·az 기반) 유도 무브먼트를 재중심화해 inch로 — 실측 pfx가 아닌 근사값.
+    구종별 참조 원(PITCH_REF)·세션 예측 이력·가상 입력의 예측 점이 이 좌표계를 쓴다
+    (위 = 라이징/포심, 아래 = 드롭/커브). 실제 투구 데이터의 Statcast pfx_x·pfx_z(×12)와는
+    좌표계가 달라 직접 겹쳐 비교할 수 없다 — 실제 투구 모드의 점·링은 실측값을 쓴다."""
     rx, rz = _raw_pfx(spd, ax, az, ext)
     return (rx - _PFX0[0]) * 12.0, (rz - _PFX0[1]) * 12.0
 
@@ -630,9 +632,10 @@ def render_prob_dist(proba, label):
 def render_movement(inp):
     """유도 무브먼트(inch) 평면. 원점 중심 12·24인치 동심원 + 구종별 참조 클러스터
     (회색 원, 라벨 없음, 예측 구종만 빨간 테두리) 위에 현재 예측 투구를 빨간 링으로.
-    세로는 Statcast 관례(위 = 라이징/포심, 아래 = 드롭/커브). 배경 회색 점은 실제
-    데이터 로드 시 그 분포, 아니면 세션 예측 이력. 예측 점·클러스터·이력은 모두
-    같은 식(_pfx_inches)이라 서로 비교 가능하다."""
+    세로는 Statcast 관례(위 = 라이징/포심, 아래 = 드롭/커브).
+    - 실제 투구 모드: 회색 점(투구 분포)과 빨간 링 모두 Statcast 실측 pfx_x·pfx_z(×12).
+    - 가상 입력 모드: 빨간 링·회색 점(세션 이력) 모두 _pfx_inches 근사 계산값.
+    구종별 회색 원은 항상 _pfx_inches 근사 좌표계라, 실제 투구 모드의 점과는 기준이 다르다."""
     st.markdown(
         '<div class="pw-label">무브먼트 차트 (유도 무브먼트, in) '
         '<span class="pw-help" tabindex="0" data-tip="회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 '
@@ -666,7 +669,7 @@ def render_movement(inp):
     if bg:
         fig.add_trace(go.Scatter(x=bg[0], y=bg[1], mode='markers',
                                  marker=dict(size=5, color=GRAY_SOFT), hoverinfo='skip'))
-        ctx = "회색 점 = 불러온 실제 투구 분포"
+        ctx = "회색 점·빨간 링 = 실제 투구의 Statcast 실측 무브먼트(회색 원과 좌표 기준 다름)"
     elif hist:
         fig.add_trace(go.Scatter(x=[h[0] for h in hist], y=[h[1] for h in hist],
                                  mode='markers', marker=dict(size=7, color=GRAY_TRAIL),
@@ -675,7 +678,13 @@ def render_movement(inp):
     else:
         ctx = "슬라이더를 움직이면 예측 이력이 쌓입니다"
 
-    px, py = _pfx_inches(inp['release_speed'], inp['ax'], inp['az'], inp['release_extension'])
+    if bg:
+        # 실제 투구: 회색 점과 같은 실측 좌표(Statcast pfx, ft → in)
+        px, py = inp['pfx_x'] * 12.0, inp['pfx_z'] * 12.0
+    else:
+        # 가상 입력: 실측 pfx가 없으므로 ax·az 기반 근사값
+        px, py = _pfx_inches(inp['release_speed'], inp['ax'], inp['az'], inp['release_extension'])
+        ctx += " · 빨간 링 = ax·az 기반 근사 계산값"
     fig.add_trace(go.Scatter(x=[px], y=[py], mode='markers',
                              marker=dict(size=22, color='rgba(0,0,0,0)',
                                          line=dict(color=ACCENT_HEX, width=3))))
@@ -691,7 +700,7 @@ def render_movement(inp):
                    gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강) · {ctx}")
+    st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강, 근사 계산 좌표) · {ctx}")
 
 
 def render_strikezone(inp, clickable=False):
