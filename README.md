@@ -11,6 +11,8 @@ MLB Statcast 투구 데이터를 기반으로 MLP 신경망이 7가지 구종(�
 설치 없이 브라우저에서 바로 슬라이더로 가상의 투구를 만들거나, 실제 Statcast 데이터를 업로드하거나, **선수 이름으로 실제 투수의 최근 투구를 검색**해 모델의 예측과 예측 근거를 자연어로 확인할 수 있습니다.
 
 > Streamlit Cloud가 모델을 직접 로드해 추론합니다. 앱 기동 후 첫 예측만 모델 로딩으로 잠시 걸리고, 이후에는 즉시 응답합니다.
+>
+> 처음 접속 시 앱이 깨어나는 데 수십 초 걸릴 수 있어요.
 
 <p>
   <img src="results/confusion_matrix.png" width="48%" />
@@ -24,6 +26,11 @@ MLB Statcast 투구 데이터를 기반으로 MLP 신경망이 7가지 구종(�
 > 참고: 투구 단위 랜덤 분할 기준(같은 투수의 투구가 학습·테스트에 함께 포함)으로는 weighted F1 0.93 (테스트 세트 130,424건).
 
 FC(커터)와 SL(슬라이더)·FF(포심) 사이의 혼동이 가장 큰 한계로, 세 구종의 물리적 특성이 유사하기 때문입니다.
+
+<p>
+  <img src="docs/images/app_prediction.png" width="48%" alt="예측 결과 화면" />
+  <img src="docs/images/app_model_info.png" width="48%" alt="모델 정보 탭" />
+</p>
 
 ## 검증
 
