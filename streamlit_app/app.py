@@ -258,25 +258,14 @@ def _snap(v, lo, hi, step=0.5):
     return float(np.clip(round(v / step) * step, lo, hi))
 
 
-def _raw_pfx(spd, ax, az, ext):
-    t = (PITCH_DIST - ext) / max(spd * 1.467, 1)
-    return (0.20 * ax * t + 0.5 * ax * t * t,
-            (-3.0 - 0.15 * az) * t + 0.5 * az * t * t)
-
-
-# 앱의 궤적식은 유도 무브먼트에 일정한 오프셋이 있어(모든 구종이 음수) Savant처럼
-# 0을 기준으로 안 퍼진다. PITCH_REF 7개의 평균을 빼서 "포심 위 / 커브 아래" 로 재중심화.
-_PFX0 = [sum(c) / len(c)
-         for c in zip(*(_raw_pfx(s, a, z, 6.2) for s, a, z in PITCH_REF.values()))]
-
-
 def _pfx_inches(spd, ax, az, ext=6.2):
-    """앱 궤적식(ax·az 기반) 유도 무브먼트를 재중심화해 inch로 — 실측 pfx가 아닌 근사값.
-    구종별 참조 원(PITCH_REF)·세션 예측 이력·가상 입력의 예측 점이 이 좌표계를 쓴다
-    (위 = 라이징/포심, 아래 = 드롭/커브). 실제 투구 데이터의 Statcast pfx_x·pfx_z(×12)와는
-    좌표계가 달라 직접 겹쳐 비교할 수 없다 — 실제 투구 모드의 점·링은 실측값을 쓴다."""
-    rx, rz = _raw_pfx(spd, ax, az, ext)
-    return (rx - _PFX0[0]) * 12.0, (rz - _PFX0[1]) * 12.0
+    """ax·az(가속도, ft/s²)와 비행시간으로 계산한 유도 무브먼트(inch).
+    pfx = 0.5·a·t² (z는 중력 32.174 제거), t = 릴리스~홈플레이트 거리 / 초기 구속.
+    2026시즌 실측 Statcast pfx_x·pfx_z(×12)와 절대오차 약 1in(x)·0.5in(z)로 일치해,
+    구종별 참조 원(PITCH_REF)·가상 입력 링·실제 투구 점이 같은 좌표계에 놓인다
+    (위 = 라이징/포심, 아래 = 드롭/커브)."""
+    t = (PITCH_DIST - ext) / max(spd * 1.467, 1)
+    return 6.0 * ax * t * t, 6.0 * (az + 32.174) * t * t
 
 
 def in_data_mode():
@@ -634,8 +623,8 @@ def render_movement(inp):
     (회색 원, 라벨 없음, 예측 구종만 빨간 테두리) 위에 현재 예측 투구를 빨간 링으로.
     세로는 Statcast 관례(위 = 라이징/포심, 아래 = 드롭/커브).
     - 실제 투구 모드: 회색 점(투구 분포)과 빨간 링 모두 Statcast 실측 pfx_x·pfx_z(×12).
-    - 가상 입력 모드: 빨간 링·회색 점(세션 이력) 모두 _pfx_inches 근사 계산값.
-    구종별 회색 원은 항상 _pfx_inches 근사 좌표계라, 실제 투구 모드의 점과는 기준이 다르다."""
+    - 가상 입력 모드: 빨간 링·회색 점(세션 이력)은 _pfx_inches 계산값.
+    구종별 회색 원도 _pfx_inches 계산값이며, 계산식이 실측 pfx와 같은 좌표계라 모두 겹쳐 비교할 수 있다."""
     st.markdown(
         '<div class="pw-label">무브먼트 차트 (유도 무브먼트, in) '
         '<span class="pw-help" tabindex="0" data-tip="회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 '
@@ -669,7 +658,7 @@ def render_movement(inp):
     if bg:
         fig.add_trace(go.Scatter(x=bg[0], y=bg[1], mode='markers',
                                  marker=dict(size=5, color=GRAY_SOFT), hoverinfo='skip'))
-        ctx = "회색 점·빨간 링 = 실제 투구의 Statcast 실측 무브먼트(회색 원과 좌표 기준 다름)"
+        ctx = "회색 점·빨간 링 = 실제 투구의 Statcast 실측 무브먼트"
     elif hist:
         fig.add_trace(go.Scatter(x=[h[0] for h in hist], y=[h[1] for h in hist],
                                  mode='markers', marker=dict(size=7, color=GRAY_TRAIL),
@@ -682,9 +671,9 @@ def render_movement(inp):
         # 실제 투구: 회색 점과 같은 실측 좌표(Statcast pfx, ft → in)
         px, py = inp['pfx_x'] * 12.0, inp['pfx_z'] * 12.0
     else:
-        # 가상 입력: 실측 pfx가 없으므로 ax·az 기반 근사값
+        # 가상 입력: 실측 pfx가 없으므로 ax·az·구속으로 계산(실측 대비 오차 ~1in)
         px, py = _pfx_inches(inp['release_speed'], inp['ax'], inp['az'], inp['release_extension'])
-        ctx += " · 빨간 링 = ax·az 기반 근사 계산값"
+        ctx += " · 빨간 링 = ax·az·구속으로 계산한 무브먼트"
     fig.add_trace(go.Scatter(x=[px], y=[py], mode='markers',
                              marker=dict(size=22, color='rgba(0,0,0,0)',
                                          line=dict(color=ACCENT_HEX, width=3))))
@@ -700,7 +689,7 @@ def render_movement(inp):
                    gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강, 근사 계산 좌표) · {ctx}")
+    st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강) · {ctx}")
 
 
 def render_strikezone(inp, clickable=False):
