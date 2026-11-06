@@ -24,8 +24,11 @@ def main():
         page.goto(APP_URL.rstrip('/') + '/~/+/', timeout=120_000)
         page.locator(APP_READY).first.wait_for(timeout=180_000)
         page.locator('.pw-summary').first.wait_for(timeout=120_000)  # 첫 예측 완료
+        # SHAP 패널 자연어 설명은 백그라운드 생성 — "설명 생성 중…"이 사라질 때까지 대기
+        page.wait_for_function('() => !document.body.innerText.includes("설명 생성 중")',
+                               timeout=60_000)
         page.wait_for_timeout(5_000)  # Plotly 차트 렌더 여유
-
+        pred_text = page.inner_text('body')
         page.screenshot(path=os.path.join(OUT_DIR, 'app_prediction.png'))
 
         page.get_by_role('tab', name='모델 정보').click()
@@ -35,6 +38,8 @@ def main():
         page.screenshot(path=os.path.join(OUT_DIR, 'app_model_info.png'))
         browser.close()
 
+    if '설명 생성 중' in pred_text:
+        sys.exit('[확인 실패] 예측 화면에 "설명 생성 중…"이 남아 있음')
     missing = [v for v in EXPECTED if v not in text]
     if missing:
         sys.exit(f'[확인 실패] 모델 정보 탭에 {missing} 없음 — 배포 반영 여부 확인 필요')
