@@ -1139,8 +1139,9 @@ with st.sidebar:
             'az': az, 'ax': ax_, 'vz0': vz0, 'vx0': vx0,
             'release_pos_x': rx, 'release_pos_z': rz, 'vy0': round(vy0, 2),
             'effective_speed': round(spd * 0.984, 2),
-            'pfx_z': round(vz0 * t + 0.5 * az * t**2, 3),
-            'pfx_x': round(vx0 * t + 0.5 * ax_ * t**2, 3),
+            # Statcast pfx(ft) = 0.5·a·t², z는 중력 제거 — _pfx_inches와 같은 식(÷12)
+            'pfx_z': round(0.5 * (az + 32.174) * t**2, 3),
+            'pfx_x': round(0.5 * ax_ * t**2, 3),
             'plate_z': round(float(np.clip(rz + vz0*t + 0.5*az*t**2, 0, 5)), 3),
             'plate_x': round(float(np.clip(rx + vx0*t + 0.5*ax_*t**2, -2, 2)), 3),
         })

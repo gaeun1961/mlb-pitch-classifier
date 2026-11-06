@@ -35,13 +35,15 @@ PITCH_COLORS = {
 
 PITCH_DIST = 60.5
 
+# 기본 입력값 = 2026시즌 우완 싱커(SI) 실측 평균(79,502건, 슬라이더 step에 맞춰 반올림).
+# SHAP 특성 카드의 "일반적인 수준" 기준값으로도 쓰인다.
 SAMPLE_VALUES = {
-    'release_speed': 94.5, 'release_spin_rate': 2280.0,
-    'release_extension': 6.2, 'release_pos_x': -1.5,
-    'release_pos_z': 6.1, 'pfx_x': 0.8, 'pfx_z': 1.2,
-    'plate_x': 0.3, 'plate_z': 2.8, 'vx0': 5.2,
-    'vy0': -138.0, 'vz0': -5.1, 'ax': 8.3, 'ay': 28.5,
-    'az': -14.2, 'effective_speed': 93.1, 'spin_axis': 210.0,
+    'release_speed': 94.5, 'release_spin_rate': 2210.0,
+    'release_extension': 6.4, 'release_pos_x': -1.9,
+    'release_pos_z': 5.6, 'pfx_x': -1.26, 'pfx_z': 0.63,
+    'plate_x': -0.17, 'plate_z': 2.35, 'vx0': 7.34,
+    'vy0': -137.4, 'vz0': -3.98, 'ax': -17.5, 'ay': 30.3,
+    'az': -23.5, 'effective_speed': 94.7, 'spin_axis': 225.0,
 }
 
 
