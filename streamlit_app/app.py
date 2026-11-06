@@ -77,9 +77,9 @@ GUIDE_ROWS = [
 ]
 
 # 구종별 정밀도·재현율·F1. 배포 모델(2024~2025 학습)을 학습 때 전혀 보지 못한
-# 2026시즌 데이터(549,360건, data/statcast_2026.csv.gz)로 평가한 실측값 — 위
-# 요약 지표(Weighted F1 0.93)는 2024~2025 자체의 무작위 분할 테스트셋 기준이라
-# 서로 직접 비교하면 안 된다(진짜 미래 시즌 검증이라 더 엄격해 수치가 더 낮다).
+# 2026시즌 데이터(549,360건, data/statcast_2026.csv.gz)로 평가한 실측값 — 모델 정보 탭
+# 요약 지표(Weighted F1 0.859)는 2024~2025 투수 단위 5-fold 기준이라 평가 방식이 달라
+# 서로 직접 비교하면 안 된다.
 CLASS_METRICS = {
     'FF': (0.953, 0.974, 0.964), 'SI': (0.945, 0.933, 0.939),
     'SL': (0.846, 0.884, 0.865), 'CU': (0.938, 0.908, 0.923),
@@ -598,8 +598,8 @@ def render_summary(label, conf, inf_ms):
         f'<span class="pw-sum-v"><i></i>{PITCH_NAMES.get(label, label)}</span></span>'
         f'<span class="pw-sum-chip"><span class="pw-sum-k">신뢰도</span>'
         f'<span class="pw-sum-v">{conf * 100:.0f}%</span></span>'
-        '<span class="pw-sum-chip"><span class="pw-sum-k">모델 정확도</span>'
-        '<span class="pw-sum-v">93.4%</span></span>'
+        '<span class="pw-sum-chip"><span class="pw-sum-k">정확도 (처음 보는 투수 기준)</span>'
+        '<span class="pw-sum-v">86.0%</span></span>'
         f'<span class="pw-sum-chip"><span class="pw-sum-k">추론 시간</span>'
         f'<span class="pw-sum-v">{inf_ms:.0f}ms</span></span>'
         '</div>',
@@ -820,22 +820,22 @@ def render_paths(inp, p_throws):
 def render_model_info():
     st.markdown('<div class="pw-label">모델 정보</div>', unsafe_allow_html=True)
     m1, m2, m3 = st.columns(3)
-    m1.metric("Weighted F1", "0.93")
-    m2.metric("Test Accuracy", "93.4%")
+    m1.metric("Weighted F1", "0.859")
+    m2.metric("Test Accuracy", "86.0%")
     m3.metric("Pitch Types", "7")
     st.caption(
         "17개 Statcast 피처를 입력하면 MLP 신경망이 7가지 구종 중 하나를 예측합니다. "
-        "MLB Statcast 2024~2025 정규시즌 데이터로 학습 · Weighted F1 0.93 · "
+        "MLB Statcast 2024~2025 정규시즌 데이터로 학습 · 위 지표는 투수 단위 5-fold 평균(처음 보는 투수 기준) · "
         "모델은 lru_cache로 프로세스당 1회만 로드됩니다."
     )
+    st.caption("참고: 투구 단위 랜덤 분할 기준(같은 투수가 학습·테스트에 함께 포함)으로는 Weighted F1 0.93 · 정확도 93.4%")
 
     st.divider()
     st.markdown(
         '<div class="pw-label">구종별 정밀도 · 재현율 · F1 '
         '<span class="pw-help" tabindex="0" data-tip="2024~2025로 학습한 모델을 학습 때 전혀 보지 못한 2026시즌 '
-        '데이터(549,360건)에 평가한 실측값입니다. 위 요약 지표는 2024~2025 자체의 무작위 분할 '
-        '테스트셋 기준이라 서로 직접 비교하지 마세요 — 진짜 미래 시즌 검증이라 여기 수치가 더 '
-        '낮습니다.">❓</span></div>',
+        '데이터(549,360건)에 평가한 실측값입니다. 위 요약 지표(투수 단위 5-fold, 처음 보는 투수 기준)와는 '
+        '평가 방식이 달라 서로 직접 비교하지 마세요.">❓</span></div>',
         unsafe_allow_html=True)
     rows = "".join(
         f'<tr><td><span class="pw-gcode">{code}</span>{PITCH_NAMES.get(code, code)}</td>'
