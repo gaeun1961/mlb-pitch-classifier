@@ -53,7 +53,7 @@ def predict(input_dict):
     x = np.array([[input_dict[col] for col in FEATURE_COLS]], dtype=np.float32)
     x = scaler.transform(x)
 
-    proba      = model.predict(x, verbose=0)[0]
+    proba      = model(x, training=False).numpy()[0]
     pred_idx   = int(np.argmax(proba))
     pred_label = le.classes_[pred_idx]
     confidence = float(proba[pred_idx])
