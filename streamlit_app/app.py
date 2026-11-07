@@ -355,9 +355,8 @@ def _explain_executor():
     return concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
-def _explain_worker(items, p_throws):
-    """스레드에서 실행 — st.cache_data는 메인 스크립트 컨텍스트에 의존하므로 여기서는 안 씀."""
-    label, conf, proba, _ = predict(dict(items))
+def _explain_worker(items, p_throws, label, conf, proba):
+    """스레드에서 실행 — 메인에서 이미 계산한 예측 결과를 받아 설명만 생성한다(모델 재추론 없음)."""
     return explain(dict(items), label, conf, proba, p_throws)
 
 
@@ -387,7 +386,7 @@ def run_prediction(inp):
         if st.session_state.get('_last_pred_key') != key:
             st.session_state.explanation = None
             st.session_state['_explain_future'] = _explain_executor().submit(
-                _explain_worker, key, st.session_state.p_throws)
+                _explain_worker, key, st.session_state.p_throws, label, conf, proba)
         st.session_state['_last_pred_key'] = key
         st.session_state.inf_ms = inf_ms
         st.session_state.warmed_up = True
@@ -975,10 +974,10 @@ def render_feature_card(f, c, mx, label):
     )
 
 
-@st.fragment(run_every=1)
-def _explanation_fragment():
-    """설명이 백그라운드 스레드에서 준비되면 자동으로 표시한다. 1초마다 확인하지만
-    이 프래그먼트만 다시 그려서 슬라이더 등 나머지 UI는 전혀 영향받지 않는다."""
+def _explanation_body():
+    """설명이 백그라운드 스레드에서 준비되면 자동으로 표시한다. 설명 작업이 진행 중일 때만
+    1초마다 이 프래그먼트를 다시 그려 확인하고(나머지 UI는 영향 없음), 완료되면 앱을 한 번
+    다시 실행해 폴링 없는 프래그먼트로 바꾼다."""
     future = st.session_state.get('_explain_future')
     if future is not None and future.done():
         try:
@@ -986,6 +985,8 @@ def _explanation_fragment():
         except Exception:
             st.session_state.explanation = None
         st.session_state['_explain_future'] = None
+        if st.session_state.get('_explain_polling'):
+            st.rerun()          # 폴링 중지(run_every 없는 프래그먼트로 다시 그림)
 
     explanation = st.session_state.explanation
     if explanation:
@@ -1008,7 +1009,9 @@ def render_shap_panel(attribution, conf, label):
         st.info("사이드바에서 값을 조절하면 기여도가 표시됩니다.")
         return
 
-    _explanation_fragment()
+    pending = st.session_state.get('_explain_future') is not None
+    st.session_state['_explain_polling'] = pending
+    st.fragment(_explanation_body, run_every=1 if pending else None)()
 
     base, contribs = _waterfall_contribs(attribution, conf)
     ordered = sorted(contribs.items(), key=lambda kv: abs(kv[1]), reverse=True)
