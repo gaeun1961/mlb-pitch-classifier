@@ -58,7 +58,7 @@ def health():
 def predict_pitch(features: PitchFeatures):
     input_dict = features.model_dump()
     p_throws = input_dict.pop('p_throws')
-    label, confidence, proba = predict(input_dict)
+    label, confidence, proba, _ = predict(input_dict)  # 4번째(피처 기여도)는 응답 스키마에 없음
     explanation = generate_explanation(input_dict, label, confidence, proba, p_throws)
     return PredictionResponse(
         predicted_label=label,
