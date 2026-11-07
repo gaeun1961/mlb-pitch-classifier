@@ -60,6 +60,8 @@ jobs:
           ${{ github.event_name == 'schedule' && '매월 1일 자동 실행(지난달까지 누적 데이터 포함)된' || '수동 트리거로 실행된' }} 재학습 결과입니다. 병합 전에 아래 지표와 confusion_matrix.png/loss_accuracy.png를 검토해주세요 — 새 모델이 항상 더 낫다는 보장은 없습니다 (README/앱 캡션의 정확도 문구도 필요시 함께 갱신).
 
           $METRICS
+
+          ⚠️ metrics.md 수치는 랜덤 분할 기준. README·streamlit_app/app.py의 수치는 투수 단위 5-fold 기준이라 scripts/의 평가 스크립트(scripts/eval_groupkfold.py)로 다시 평가해 갱신할 것.
           EOF
           )"
 
