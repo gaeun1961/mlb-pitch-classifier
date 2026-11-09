@@ -77,6 +77,31 @@ def save_metrics_summary(y_test, y_pred, label_map, acc):
     return weighted_f1
 
 
+DEPLOYED_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'backend', 'model')
+
+
+def eval_deployed(X_test, y_test, label_map):
+    """현재 배포 모델을 같은 테스트 세트로 평가한다(자동 머지 판단용). 배포 모델이 없거나 구종이 다르면 None."""
+    import pickle
+    import tensorflow as tf
+    from data_loader import SCALER_PATH
+    try:
+        with open(os.path.join(DEPLOYED_DIR, 'label_encoder.pkl'), 'rb') as f:
+            old_le = pickle.load(f)
+        if list(old_le.classes_) != [label_map[i] for i in range(len(label_map))]:
+            return None
+        with open(SCALER_PATH, 'rb') as f:
+            new_scaler = pickle.load(f)
+        with open(os.path.join(DEPLOYED_DIR, 'scaler.pkl'), 'rb') as f:
+            old_scaler = pickle.load(f)
+        old_model = tf.keras.models.load_model(os.path.join(DEPLOYED_DIR, 'pitch_model.h5'), compile=False)
+    except (OSError, ValueError):
+        return None
+    X_old = old_scaler.transform(new_scaler.inverse_transform(X_test))
+    y_old = np.argmax(old_model.predict(X_old, verbose=0), axis=1)
+    return float((y_old == y_test).mean())
+
+
 def train():
     """데이터 로드부터 학습, 평가, 결과 저장까지 전체 파이프라인을 실행한다."""
     X_train, X_val, X_test, y_train, y_val, y_test, label_map = load_data()
@@ -103,6 +128,15 @@ def train():
     save_loss_accuracy(history)
     save_confusion_matrix(y_test, y_pred, label_map)
     save_metrics_summary(y_test, y_pred, label_map, acc)
+
+    # 자동 머지 게이트: 같은 테스트 세트에서 배포 모델과 비교한 결과를 남긴다
+    base = eval_deployed(X_test, y_test, label_map)
+    base_pct = '-' if base is None else f'{base * 100:.2f}%'
+    with open(os.path.join(RESULTS_DIR, 'metrics.md'), 'a', encoding='utf-8') as f:
+        f.write(f'\n**현재 배포 모델(같은 테스트 세트)**: {base_pct}\n')
+    with open(os.path.join(RESULTS_DIR, 'gate.env'), 'w') as f:
+        f.write(f'NEW_ACC={acc:.6f}\nBASE_ACC={"" if base is None else f"{base:.6f}"}\n')
+    print(f'[게이트] 새 모델 {acc:.4f} / 배포 모델 {base}')
 
 
 if __name__ == '__main__':
