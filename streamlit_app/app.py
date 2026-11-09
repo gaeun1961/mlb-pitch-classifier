@@ -401,17 +401,18 @@ def run_prediction(inp):
         st.error(f"예측에 실패했습니다: {e}")
 
 
-def select_and_predict_from_df(df):
-    """DataFrame에서 결측치 없는 행만 골라 선택 UI를 보여주고, 선택된 투구로 예측을 실행한다."""
+def prepare_pitches(df):
+    """결측 검사 후 예측 가능한 행만 남기고 무브먼트 배경(movement_bg)을 채운다.
+    선택할 투구가 없으면 None."""
     missing = [c for c in FEATURE_COLS if c not in df.columns]
     if missing:
         st.error(f"필요한 컬럼이 없습니다: {missing}")
-        return
+        return None
 
     df_valid = df.dropna(subset=FEATURE_COLS).reset_index(drop=True)
     if df_valid.empty:
         st.warning("선택 가능한 투구가 없습니다.")
-        return
+        return None
 
     st.success(f"{len(df_valid):,}개 투구 로드 완료")
 
@@ -422,7 +423,11 @@ def select_and_predict_from_df(df):
         bg = bg.sample(500, random_state=0)
     st.session_state.movement_bg = ((bg['pfx_x'] * 12.0).tolist(),
                                     (bg['pfx_z'] * 12.0).tolist())
+    return df_valid
 
+
+def select_and_predict(df_valid):
+    """prepare_pitches를 거친 DataFrame에서 투구를 고르게 하고, 선택된 투구로 예측을 실행한다."""
     show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
                               'release_spin_rate', 'game_date'] if c in df_valid.columns]
     idx = st.selectbox(
@@ -436,6 +441,13 @@ def select_and_predict_from_df(df):
     if 'p_throws' in df_valid.columns:
         st.session_state.p_throws = str(row.get('p_throws', 'R'))
     run_prediction(inp)
+
+
+def select_and_predict_from_df(df):
+    """DataFrame에서 결측치 없는 행만 골라 선택 UI를 보여주고, 선택된 투구로 예측을 실행한다."""
+    df_valid = prepare_pitches(df)
+    if df_valid is not None:
+        select_and_predict(df_valid)
 
 
 def contains_korean(text):
