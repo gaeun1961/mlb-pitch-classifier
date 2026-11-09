@@ -5,3 +5,4 @@ venv/
 .env
 desktop_app/data/
 desktop_app/model/
+desktop_app/results/
