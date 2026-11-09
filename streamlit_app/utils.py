@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
@@ -88,3 +89,49 @@ def compute_trajectory_top(inp, p_throws='R', n=50):
     x_pos = rx + 0.20 * ax_ * t + 0.5 * ax_ * t ** 2
     y_pos = ext + abs(vy0) * t
     return y_pos, x_pos
+
+
+GAME_TYPE_TAG = {'S': ' (시범)', 'F': ' (PS)', 'D': ' (PS)', 'L': ' (PS)', 'W': ' (PS)'}
+
+
+def games_from_pitches(df):
+    """투수 한 명의 Statcast 투구 df → 등판 목록(game_pk 인덱스, 날짜 내림차순).
+
+    컬럼: date, opp, n(투구 수 — 결측 제거 전 원본 기준), label("11/02 vs NYY · 98구").
+    상대 팀: 투수가 초(Top)에 던지면 홈 팀이므로 상대는 away_team, 말(Bot)이면 home_team.
+    """
+    # 더블헤더 순서: Statcast엔 경기 시작 시각이 없고 game_pk 순서는 재편성 경기면 뒤집힌다
+    # (2026-04-30 PHI·08-29 실측 모두 반대). 대신 2차전은 "직전 등판 후 0일"이므로
+    # pitcher_days_since_prev_game이 큰 쪽이 1차전(시즌 첫 등판 NaN은 가장 앞).
+    since = df.get('pitcher_days_since_prev_game', 0)
+    g = df.assign(_since=since).groupby('game_pk').agg(
+        date=('game_date', 'first'), topbot=('inning_topbot', 'first'),
+        home=('home_team', 'first'), away=('away_team', 'first'),
+        game_type=('game_type', 'first'), since=('_since', 'first'), n=('game_pk', 'size'),
+    )
+    g['date'] = pd.to_datetime(g['date'])
+    g['opp'] = g['away'].where(g['topbot'] == 'Top', g['home'])
+    g = g.assign(_k=-g['since'].fillna(1e9)).sort_values(['date', '_k'])
+    nth = g.groupby('date').cumcount() + 1
+    dh = g.groupby('date')['n'].transform('size') > 1
+    g['label'] = (g['date'].dt.strftime('%m/%d')
+                  + (' (' + nth.astype(str) + ')').where(dh, '')
+                  + ' vs ' + g['opp'] + ' · ' + g['n'].astype(str) + '구'
+                  + g['game_type'].map(GAME_TYPE_TAG).fillna(''))
+    g = g.iloc[::-1]   # 최신 등판이 위 — 같은 날이면 (2)가 (1) 위
+    return g[['date', 'opp', 'n', 'label']]
+
+
+if __name__ == '__main__':
+    # 홈(Top→away 상대)/원정(Bot→home 상대) 판정 + 더블헤더 (1)/(2) + 정렬·투구 수.
+    # 더블헤더는 실제 재편성 경기처럼 game_pk가 큰 쪽(3)이 1차전(직전 등판 후 4일).
+    rows = ([(1, '2026-05-01', 'Top', 'MIA', 'NYM', 'R', None)] * 3
+            + [(3, '2026-06-02', 'Bot', 'ATL', 'MIA', 'S', 4)] * 2
+            + [(2, '2026-06-02', 'Bot', 'ATL', 'MIA', 'R', 0)])
+    t = pd.DataFrame(rows, columns=['game_pk', 'game_date', 'inning_topbot', 'home_team',
+                                    'away_team', 'game_type', 'pitcher_days_since_prev_game'])
+    got = games_from_pitches(t)
+    assert list(got.index) == [2, 3, 1], got
+    assert list(got['label']) == ['06/02 (2) vs ATL · 1구', '06/02 (1) vs ATL · 2구 (시범)',
+                                  '05/01 vs NYM · 3구'], list(got['label'])
+    print('games_from_pitches OK')
