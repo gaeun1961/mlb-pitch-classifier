@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write   # 새 데이터를 커밋하면 재학습 워크플로우를 실행
 
 jobs:
   fetch:
@@ -26,6 +27,8 @@ jobs:
         run: python scripts/fetch_daily.py
 
       - name: Commit and push if changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -36,7 +39,10 @@ jobs:
           else
             git commit -m "chore: update statcast data ($(date -u +%Y-%m-%d))"
             for i in 1 2 3 4 5; do
-              git push && exit 0
+              if git push; then
+                gh workflow run retrain_model.yml   # 새 데이터가 들어온 날만 재학습
+                exit 0
+              fi
               echo "Push rejected (attempt $i) -- rebasing onto latest main and retrying..."
               git pull --rebase origin main
             done
