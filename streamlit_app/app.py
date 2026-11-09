@@ -1,6 +1,7 @@
 """app.py - MLB Pitch Classifier 웹 데모 (Streamlit) · "Pitch Workbench" 라이트 테마"""
 
 import concurrent.futures
+import html
 import re
 import time
 from datetime import date, timedelta
@@ -20,7 +21,7 @@ st.set_page_config(
     page_title="Pitch Workbench",
     page_icon="⚾",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",   # 모바일에선 접힌 채 시작(펼치면 메인을 덮음)
 )
 
 ACCENT_HEX = "#c53637"      # 빨강 = 지금 예측된 구종
@@ -103,25 +104,33 @@ GLOBAL_IMPORTANCE = [
 # 문자열은 모듈 상수라 재생성 비용은 없다(= 성능 병목 아님).
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap');
 
 :root{
+  --font:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --bg:#ffffff;
   --card:#ffffff;
   --card-border:#e3e5e8;
+  --rule:#eceef0;
   --text:#1c1f24;
-  --text-2:#565b63;
-  --text-3:#7a8089;
-  --label:#6b7078;
+  --text-2:#50565e;
+  --text-3:#62676f;          /* 흰 배경 5.7:1 · 칩 배경 5.2:1 (작은 글씨 AA 4.5:1 이상) */
   --accent:#c53637;
+  --on-accent:#ffffff;
   --chip-gray:#f4f5f6;
+  --field:#f4f5f7;
   --track:#e9eaec;
+  --tip-bg:#3f444b;
+  --radius:8px;
 }
 
-html,body,[class*="css"]{font-family:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
-.stApp{background:#ffffff;color:var(--text);}
-h1,h2,h3,h4{font-family:'Sora',sans-serif !important;color:var(--text);}
+html,body,[class*="css"]{font-family:var(--font);}
+.stApp{background:var(--bg);color:var(--text);}
+h1,h2,h3,h4{font-family:var(--font) !important;color:var(--text);text-wrap:balance;}
 #MainMenu,footer{visibility:hidden;}
 header[data-testid="stHeader"]{height:0 !important;visibility:hidden;}
+/* 헤더는 숨기되 사이드바 펼침 버튼은 살린다 — 없으면 접힌 사이드바(모바일 기본)를 다시 열 수 없다 */
+[data-testid="stExpandSidebarButton"]{visibility:visible;}
 hr{border-color:var(--card-border) !important;}
 
 /* 상단 여백 축소 */
@@ -129,81 +138,73 @@ hr{border-color:var(--card-border) !important;}
 
 /* 사이드바 컴팩트화 */
 section[data-testid="stSidebar"]{background:var(--card);border-right:1px solid var(--card-border);}
-section[data-testid="stSidebar"] .block-container{padding:0.7rem 1rem 1rem;}
+section[data-testid="stSidebar"] .block-container{padding:0.75rem 1rem 1rem;}
 section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:0.5rem;}
-section[data-testid="stSidebar"] hr{margin:0.45rem 0 !important;}
-section[data-testid="stSidebar"] [data-testid="stSlider"]{padding-bottom:0.15rem;}
+section[data-testid="stSidebar"] hr{margin:0.5rem 0 !important;}
 section[data-testid="stSidebar"] [data-testid="stSliderTickBar"]{display:none;}
-section[data-testid="stSidebar"] [data-testid="stWidgetLabel"]{margin-bottom:0.1rem;}
 section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p{font-size:0.82rem;}
-section[data-testid="stSidebar"] .stExpander{margin-top:0.2rem;}
 
 div[data-testid="stVerticalBlockBorderWrapper"]{
   background:var(--card);
   border:1px solid var(--card-border) !important;
-  border-radius:16px !important;
-  box-shadow:0 1px 2px rgba(16,24,40,0.03);
+  border-radius:var(--radius) !important;
 }
-div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
+div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:16px 20px;}
 
-.pw-label{font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--label);margin-bottom:10px;}
-.pw-help{position:relative;display:inline-block;cursor:help;font-weight:700;color:var(--text-3);border:1px solid var(--card-border);border-radius:50%;width:14px;height:14px;line-height:13px;text-align:center;font-size:9px;margin-left:4px;text-transform:none;letter-spacing:0;vertical-align:middle;outline:none;}
-.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:135%;left:0;width:280px;max-width:70vw;padding:11px 13px;border-radius:8px;background:#5b6068;color:#ffffff;font-size:13px;font-weight:400;line-height:1.5;text-align:left;text-transform:none;letter-spacing:0;white-space:normal;box-shadow:0 6px 18px rgba(0,0,0,0.2);opacity:0;visibility:hidden;transition:opacity .12s ease;pointer-events:none;}
-.pw-help:hover::after,.pw-help:focus::after{opacity:1;visibility:visible;}
+/* 라벨 = 본문 글꼴 한 단계 작게, 대문자·자간 없음 */
+.pw-label{font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:12px;}
+.pw-help{position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:help;
+  font-weight:700;color:var(--text-3);border:1px solid var(--text-3);border-radius:50%;
+  width:16px;height:16px;font-size:11px;margin-left:6px;vertical-align:middle;}
+.pw-help::before{content:"";position:absolute;inset:-4px;}   /* 클릭·탭 영역 24px */
+.pw-help:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:150%;left:-8px;width:280px;max-width:70vw;
+  padding:12px;border-radius:var(--radius);background:var(--tip-bg);color:var(--on-accent);font-size:13px;font-weight:400;
+  line-height:1.5;text-align:left;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;}
+.pw-help:hover::after,.pw-help:focus-visible::after{opacity:1;visibility:visible;}
 
-.pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
-.pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
+div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
 
-/* 결과 요약 스트립 — 4칸 균등, 각 칸 왼쪽 정렬(라벨 위 / 큰 값 아래). 예측 구종만 빨간 테두리 */
-.pw-summary{display:flex;gap:10px;align-items:stretch;margin-bottom:16px;}
-.pw-sum-pred,.pw-sum-chip{flex:1 1 0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;background:#fff;border-radius:12px;padding:8px 14px;}
-.pw-sum-pred{border:1.5px solid var(--accent);}
-.pw-sum-chip{border:1px solid var(--card-border);}
-.pw-sum-k{font-size:0.66rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-3);}
-.pw-sum-v{font-family:'Sora';font-size:1.2rem;font-weight:700;color:var(--text);line-height:1.1;}
-.pw-sum-pred .pw-sum-v{display:inline-flex;align-items:center;gap:6px;}
-.pw-sum-pred i{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;}
+.pw-logo{display:flex;align-items:center;gap:8px;margin:0 0 12px;}
+.pw-logo span{font-weight:700;font-size:1.05rem;color:var(--text);}
+
+/* 결과 요약 — 예측 구종 하나만 크게, 모델 정보는 작은 한 줄 */
+.pw-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;margin:4px 0 16px;
+  padding-bottom:12px;border-bottom:1px solid var(--rule);}
+.pw-sum-pred{font-size:1.9rem;font-weight:700;color:var(--accent);line-height:1.1;}
+.pw-sum-conf{font-size:1.1rem;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.pw-sum-meta{flex-basis:100%;font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+.pw-sum-meta span + span{margin-left:12px;}
 
 /* 구종별 확률 바 — 전부 회색, 예측 구종만 빨강 */
-.pw-bar-row{display:flex;align-items:center;gap:10px;margin:6px 0;}
-.pw-bar-name{width:82px;font-size:0.82rem;color:var(--text-2);flex:none;}
-.pw-bar-track{flex:1;height:8px;background:var(--track);border-radius:999px;overflow:hidden;}
-.pw-bar-fill{display:block;height:100%;border-radius:999px;}
-.pw-bar-pct{width:40px;text-align:right;font-size:0.8rem;font-weight:600;color:var(--text);flex:none;}
+.pw-bar-row{display:flex;align-items:center;gap:12px;margin:8px 0;}
+.pw-bar-name{width:84px;font-size:0.82rem;color:var(--text-2);flex:none;}
+.pw-bar-track{flex:1;height:8px;background:var(--track);border-radius:2px;overflow:hidden;}
+.pw-bar-fill{display:block;height:100%;border-radius:2px;}
+.pw-bar-pct{width:40px;text-align:right;font-size:0.8rem;font-weight:600;color:var(--text);flex:none;font-variant-numeric:tabular-nums;}
 
-.pw-shap-head{display:flex;align-items:center;gap:8px;font-family:'Sora';font-weight:700;font-size:1rem;color:var(--text);}
-.pw-shap-sub{font-size:0.78rem;color:var(--text-3);margin:2px 0 12px;}
-.pw-shap-expl{font-size:0.82rem;line-height:1.6;color:var(--text-2);background:var(--chip-gray);padding:10px 12px;border-radius:10px;margin:0 0 14px;}
-.pw-wf-ends{display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-3);margin:-6px 2px 14px;}
-.pw-fcard{border:1px solid var(--card-border);border-radius:12px;padding:11px 13px;margin-bottom:9px;}
-.pw-fcard-top{display:flex;justify-content:space-between;align-items:center;}
+.pw-shap-head{font-weight:700;font-size:1rem;color:var(--text);}
+.pw-shap-sub{font-size:0.8rem;color:var(--text-3);margin:4px 0 12px;}
+.pw-shap-expl{font-size:0.85rem;line-height:1.6;color:var(--text-2);margin:0 0 16px;padding-left:12px;border-left:2px solid var(--accent);}
+.pw-wf-ends{display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin:-8px 0 16px;font-variant-numeric:tabular-nums;}
+
+/* 특성 기여도 — 카드 대신 구분선 목록 */
+.pw-frow{padding:10px 0;border-top:1px solid var(--rule);}
+.pw-frow-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
 .pw-fname{font-size:0.85rem;font-weight:600;color:var(--text);}
-.pw-fbadge{font-size:0.75rem;font-weight:700;padding:2px 8px;border-radius:999px;background:#fff;border:1px solid var(--card-border);color:var(--text-2);}
-.pw-fbadge.pos{color:var(--accent);border-color:var(--accent);}
-.pw-fmag{height:3px;background:var(--track);border-radius:999px;margin:9px 0 8px;overflow:hidden;}
-.pw-fmag span{display:block;height:100%;border-radius:999px;}
-.pw-fdesc{font-size:0.78rem;line-height:1.55;color:var(--text-3);margin:0;}
+.pw-fval{font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;margin-left:8px;font-weight:400;}
+.pw-fbadge{font-size:0.8rem;font-weight:700;color:var(--text-2);font-variant-numeric:tabular-nums;}
+.pw-fbadge.pos{color:var(--accent);}
+.pw-fmag{height:4px;background:var(--track);border-radius:2px;margin-top:8px;overflow:hidden;}
+.pw-fmag span{display:block;height:100%;}
 
-.pw-guide{width:100%;table-layout:fixed;border-collapse:collapse;font-size:0.76rem;color:var(--text-2);}
-.pw-guide th{font-size:0.6rem;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-3);text-align:left;padding:0 3px 5px;border-bottom:1px solid var(--card-border);}
-.pw-guide td{padding:6px 3px;border-bottom:1px solid #f1f2f4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.pw-guide td:first-child{color:var(--text);font-weight:500;white-space:normal;}
+.pw-guide{width:100%;table-layout:fixed;border-collapse:collapse;font-size:0.8rem;color:var(--text-2);font-variant-numeric:tabular-nums;}
+.pw-guide th{font-size:12px;font-weight:600;color:var(--text-3);text-align:left;padding:0 4px 4px;border-bottom:1px solid var(--card-border);}
+.pw-guide td{padding:6px 4px;border-bottom:1px solid var(--rule);overflow-wrap:anywhere;}
+.pw-guide td:first-child{color:var(--text);font-weight:500;}
 .pw-guide tbody tr:last-child td{border-bottom:none;}
-.pw-gcode{display:inline-block;font-family:'Sora';font-weight:700;font-size:0.64rem;background:var(--chip-gray);color:var(--text-2);padding:2px 5px;border-radius:5px;margin-right:6px;}
-.pw-gnote{font-size:9px;color:var(--text-3);margin-top:8px;line-height:1.4;}
-
-div[data-baseweb="tab-list"]{gap:6px;border-bottom:none !important;}
-button[data-baseweb="tab"]{background:var(--chip-gray);border-radius:999px;padding:5px 15px !important;font-family:'Sora';font-weight:600;color:var(--text-2);min-height:0;}
-button[data-baseweb="tab"][aria-selected="true"]{background:var(--text);color:#fff;}
-button[data-baseweb="tab"][aria-selected="true"] p{color:#fff !important;}
-div[data-baseweb="tab-highlight"],div[data-baseweb="tab-border"]{display:none !important;}
-button[data-baseweb="tab"] p{font-size:0.8rem !important;font-weight:600 !important;}
-
-div[role="radiogroup"]{gap:6px;flex-wrap:wrap;}
-div[role="radiogroup"] > label{background:var(--chip-gray);border:1px solid var(--card-border);border-radius:999px;padding:4px 12px;margin:0;}
-div[role="radiogroup"] > label:has(input:checked){background:var(--text);border-color:var(--text);}
-div[role="radiogroup"] > label:has(input:checked) div{color:#fff;}
-div[role="radiogroup"] > label > div:first-child{display:none;}
+.pw-gcode{display:inline-block;font-weight:700;font-size:0.7rem;background:var(--chip-gray);color:var(--text-2);padding:2px 4px;border-radius:4px;margin-right:8px;}
+.pw-gnote{font-size:12px;color:var(--text-3);margin-top:8px;line-height:1.5;}
 
 /* 입력창 — 테두리는 config.toml showWidgetBorder가 그려주고, 여기선 연한 회색
    채움을 더해 흰 배경에서도 필드 경계가 확실히 보이게 한다 */
@@ -211,8 +212,8 @@ div[role="radiogroup"] > label > div:first-child{display:none;}
 .stTextInput div[data-baseweb="base-input"],
 .stDateInput div[data-baseweb="input"],
 .stNumberInput div[data-baseweb="input"],
-.stSelectbox div[data-baseweb="select"] > div{background:#f4f5f7 !important;}
-.stTextInput input,.stDateInput input,.stNumberInput input{background:#f4f5f7 !important;}
+.stSelectbox div[data-baseweb="select"] > div{background:var(--field) !important;}
+.stTextInput input,.stDateInput input,.stNumberInput input{background:var(--field) !important;}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -370,8 +371,8 @@ def run_prediction(inp):
     설명은 준비되는 대로 자동으로 표시된다.
     """
     spinner_msg = (
-        "예측 중입니다..." if st.session_state.warmed_up
-        else "예측 중입니다... (첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요)"
+        "예측 중입니다…" if st.session_state.warmed_up
+        else "예측 중입니다… (첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요)"
     )
     try:
         with st.spinner(spinner_msg):
@@ -563,6 +564,12 @@ LOGO_HTML = """
 """
 
 
+def help_icon(tip):
+    """라벨 옆 도움말 ? — 키보드 포커스·화면 낭독기(aria-label)로도 읽히게."""
+    t = html.escape(tip, quote=True)
+    return f'<span class="pw-help" tabindex="0" role="img" aria-label="도움말: {t}" data-tip="{t}">?</span>'
+
+
 def _flip_ax(hint):
     """ax 힌트의 +/− 를 서로 뒤집는다 (좌완 표시용)."""
     return hint.replace('+', '\x00').replace('−', '+').replace('\x00', '−')
@@ -598,14 +605,10 @@ def render_guide(p_throws):
 def render_summary(label, conf, inf_ms):
     st.markdown(
         '<div class="pw-summary">'
-        '<span class="pw-sum-pred"><span class="pw-sum-k">예측 구종</span>'
-        f'<span class="pw-sum-v"><i></i>{PITCH_NAMES.get(label, label)}</span></span>'
-        f'<span class="pw-sum-chip"><span class="pw-sum-k">신뢰도</span>'
-        f'<span class="pw-sum-v">{conf * 100:.0f}%</span></span>'
-        '<span class="pw-sum-chip"><span class="pw-sum-k">정확도 (처음 보는 투수 기준)</span>'
-        '<span class="pw-sum-v">86.0%</span></span>'
-        f'<span class="pw-sum-chip"><span class="pw-sum-k">추론 시간</span>'
-        f'<span class="pw-sum-v">{inf_ms:.0f}ms</span></span>'
+        f'<span class="pw-sum-pred">{PITCH_NAMES.get(label, label)}</span>'
+        f'<span class="pw-sum-conf">신뢰도 {conf * 100:.0f}%</span>'
+        '<span class="pw-sum-meta"><span>모델 정확도 86.0% (처음 보는 투수 기준)</span>'
+        f'<span>추론 {inf_ms:.0f}ms</span></span>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -640,9 +643,9 @@ def render_movement(inp):
     구종별 회색 원도 _pfx_inches 계산값이며, 계산식이 실측 pfx와 같은 좌표계라 모두 겹쳐 비교할 수 있다."""
     st.markdown(
         '<div class="pw-label">무브먼트 차트 (유도 무브먼트, in) '
-        '<span class="pw-help" tabindex="0" data-tip="회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 '
-        '이 차트에 없는 회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 '
-        '떨어져 보일 수 있습니다.">❓</span></div>',
+        + help_icon("회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 "
+                    "이 차트에 없는 회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 "
+                    "떨어져 보일 수 있습니다.") + '</div>',
         unsafe_allow_html=True)
     bg = st.session_state.get('movement_bg')
     hist = st.session_state.history
@@ -716,7 +719,7 @@ def render_strikezone(inp, clickable=False):
         "주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치"
     )
     st.markdown(
-        f'<div class="pw-label">로케이션 · 스트라이크존 <span class="pw-help" tabindex="0" data-tip="{tip}">❓</span></div>',
+        f'<div class="pw-label">로케이션 · 스트라이크존 {help_icon(tip)}</div>',
         unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
@@ -844,9 +847,9 @@ def render_model_info():
     st.divider()
     st.markdown(
         '<div class="pw-label">구종별 정밀도 · 재현율 · F1 '
-        '<span class="pw-help" tabindex="0" data-tip="2024~2025로 학습한 모델을 학습 때 전혀 보지 못한 2026시즌 '
-        '데이터(549,360건)에 평가한 실측값입니다. 위 요약 지표(투수 단위 5-fold, 처음 보는 투수 기준)와는 '
-        '평가 방식이 달라 서로 직접 비교하지 마세요.">❓</span></div>',
+        + help_icon("2024~2025로 학습한 모델을 학습 때 전혀 보지 못한 2026시즌 "
+                    "데이터(549,360건)에 평가한 실측값입니다. 위 요약 지표(투수 단위 5-fold, 처음 보는 투수 기준)와는 "
+                    "평가 방식이 달라 서로 직접 비교하지 마세요.") + '</div>',
         unsafe_allow_html=True)
     rows = "".join(
         f'<tr><td><span class="pw-gcode">{code}</span>{PITCH_NAMES.get(code, code)}</td>'
@@ -865,9 +868,8 @@ def render_model_info():
     st.divider()
     st.markdown(
         '<div class="pw-label">전역 특성 중요도 '
-        '<span class="pw-help" tabindex="0" data-tip="오른쪽 SHAP 인사이트는 이번 한 번의 예측에 대한 기여도이고, '
-        '이 차트는 2026시즌 평가셋 전체에서 평균 낸 모델 전반의 평균적인 중요도 순위입니다.">'
-        '❓</span></div>',
+        + help_icon("오른쪽 예측 근거(SHAP)는 이번 한 번의 예측에 대한 기여도이고, "
+                    "이 차트는 2026시즌 평가셋 전체에서 평균 낸 모델 전반의 평균적인 중요도 순위입니다.") + '</div>',
         unsafe_allow_html=True)
     names = [FEAT_KR.get(f, f) for f, _ in reversed(GLOBAL_IMPORTANCE)]
     vals = [v for _, v in reversed(GLOBAL_IMPORTANCE)]
@@ -961,28 +963,26 @@ def render_waterfall(base, ordered):
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
+def _fmt(v):
+    return f"{v:.0f}" if abs(v) >= 100 else f"{v:.1f}"
+
+
 def render_feature_card(f, c, mx, label):
+    """특성 하나의 기여도 행: 이름 · 현재값(보통값) · 막대 · 기여도."""
     name = FEAT_KR.get(f, f)
     pos = c >= 0
     width = abs(c) / mx * 100 if mx else 0
     ref = SAMPLE_VALUES.get(f)
     cur = st.session_state.inp.get(f)
-    if ref is not None and cur is not None and abs(cur - ref) > 1e-6:
-        level = "높아" if cur > ref else "낮아"
-    else:
-        level = "작용해"
-    direction = "끌어올렸" if pos else "끌어내렸"
-    pitch = PITCH_NAMES.get(label, label)
-    sent = f"{name}이(가) 일반적인 수준보다 {level} {pitch} 예측 확률을 {direction}습니다 (기여도 {c:+.2f})."
+    val = f'{_fmt(cur)} (보통 {_fmt(ref)})' if ref is not None and cur is not None else ''
     st.markdown(
-        '<div class="pw-fcard">'
-        '<div class="pw-fcard-top">'
-        f'<span class="pw-fname">{name}</span>'
+        '<div class="pw-frow">'
+        '<div class="pw-frow-top">'
+        f'<span class="pw-fname">{name}<span class="pw-fval">{val}</span></span>'
         f'<span class="pw-fbadge {"pos" if pos else "neg"}">{c:+.2f}</span>'
         '</div>'
         f'<div class="pw-fmag"><span style="width:{width:.0f}%;'
         f'background:{ACCENT_HEX if pos else GRAY}"></span></div>'
-        f'<p class="pw-fdesc">{sent}</p>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -1004,19 +1004,15 @@ def _explanation_body():
 
     explanation = st.session_state.explanation
     if explanation:
-        st.markdown(f'<p class="pw-shap-expl">{explanation}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="pw-shap-expl">{html.escape(explanation)}</p>', unsafe_allow_html=True)
     elif st.session_state.get('_explain_future') is not None:
-        st.caption("💭 설명 생성 중...")
+        st.caption("설명 생성 중…")
 
 
 def render_shap_panel(attribution, conf, label):
     st.markdown(
-        '<div class="pw-shap-head">'
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c53637" '
-        'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
-        '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>'
-        'SHAP 인사이트</div>'
-        '<div class="pw-shap-sub">예측에 영향을 준 특성 기여도</div>',
+        '<div class="pw-shap-head">예측 근거 (SHAP)</div>'
+        '<div class="pw-shap-sub">각 특성이 이 예측 확률을 얼마나 올리고 내렸는지</div>',
         unsafe_allow_html=True,
     )
     if not attribution or not conf or not label:
@@ -1180,7 +1176,7 @@ with st.sidebar:
         )
         favs = st.session_state.favorites
         if favs:
-            st.markdown('<div class="pw-label">⭐ 즐겨찾기 (이번 세션)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="pw-label">즐겨찾기 (이번 세션)</div>', unsafe_allow_html=True)
             for f in favs:
                 # 구버전 세션엔 'label' 없이 {'id','name'}만 있을 수 있음 — 배포 중 세션이
                 # 유지되면 즐겨찾기 스키마가 바뀌어도 session_state는 그대로 남는다.
@@ -1196,7 +1192,7 @@ with st.sidebar:
         if query and contains_korean(query):
             st.warning("영어로 입력해주세요 (예: Gerrit Cole).")
         elif len(query) >= 2:
-            with st.spinner(f"'{query}' 검색 중..."):
+            with st.spinner(f"'{query}' 검색 중…"):
                 try:
                     candidates = search_pitchers(query)
                 except requests.exceptions.RequestException as e:
@@ -1204,21 +1200,16 @@ with st.sidebar:
                     st.error(f"선수 검색에 실패했습니다: {e}")
 
             if candidates is not None and not candidates:
-                st.error("선수를 찾을 수 없습니다.")
+                st.error("선수를 찾을 수 없습니다. 영문 철자를 확인하거나 성만 입력해 보세요.")
             elif candidates:
                 options = {career_label(c): c for c in candidates}
-                c_star, c_select = st.columns([1, 11])
-                choice = c_select.selectbox("검색 결과", options=list(options.keys()))
+                choice = st.selectbox("검색 결과", options=list(options.keys()))
                 chosen = options[choice]
                 st.session_state.p_throws = chosen['throws']
 
                 is_fav = any(f['id'] == chosen['id'] for f in st.session_state.favorites)
-                c_star.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
-                # 이모지(⭐/☆) 글리프가 없는 폰트/브라우저에서 빈 버튼으로 보이는 문제가
-                # 있어, Streamlit에 내장된 Material Symbols 아이콘으로 대체한다.
-                if c_star.button("", icon=":material/star:" if is_fav else ":material/star_border:",
-                                  key=f"fav_toggle_{chosen['id']}",
-                                  help="즐겨찾기 해제" if is_fav else "즐겨찾기에 추가"):
+                # 아이콘만 있는 버튼 대신 체크박스 — 이름·선택 상태가 화면 낭독기에도 전달된다.
+                if st.checkbox("즐겨찾기", value=is_fav, key=f"fav_toggle_{chosen['id']}") != is_fav:
                     toggle_favorite(chosen['id'], chosen['name'], choice)
                     st.rerun()
 
@@ -1240,7 +1231,7 @@ with st.sidebar:
                         st.error("시작일이 종료일보다 늦을 수 없습니다.")
                     else:
                         with st.spinner(
-                            f"{chosen['name']} 선수의 {start_d}~{end_d} 투구 데이터를 가져오는 중..."
+                            f"{chosen['name']} 선수의 {start_d}~{end_d} 투구 데이터를 가져오는 중…"
                         ):
                             df = fetch_pitcher_statcast(chosen['id'], str(start_d), str(end_d))
 
@@ -1280,7 +1271,7 @@ with st.sidebar:
                     f"최대 {MAX_DATE_ONLY_DAYS}일 범위까지만 지원합니다. 범위를 좁혀주세요."
                 )
             else:
-                with st.spinner(f"{start_d}~{end_d} 전체 투구 데이터를 가져오는 중..."):
+                with st.spinner(f"{start_d}~{end_d} 전체 투구 데이터를 가져오는 중…"):
                     df = fetch_statcast_range(str(start_d), str(end_d))
 
                 if df.empty:
