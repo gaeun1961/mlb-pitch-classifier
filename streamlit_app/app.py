@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 
 from utils import (
     predict, explain, compute_trajectory_side, compute_trajectory_top,
-    FEATURE_COLS, PITCH_NAMES, SAMPLE_VALUES, PITCH_DIST,
+    FEATURE_COLS, PITCH_NAMES, SAMPLE_VALUES, PITCH_DIST, games_from_pitches,
 )
 
 st.set_page_config(
@@ -426,14 +426,16 @@ def prepare_pitches(df):
     return df_valid
 
 
-def select_and_predict(df_valid):
-    """prepare_pitches를 거친 DataFrame에서 투구를 고르게 하고, 선택된 투구로 예측을 실행한다."""
+def select_and_predict(df_valid, key=None):
+    """prepare_pitches를 거친 DataFrame에서 투구를 고르게 하고, 선택된 투구로 예측을 실행한다.
+    key를 바꾸면(예: 경기별) 새 위젯이 되어 선택이 첫 투구로 초기화된다."""
     show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
                               'release_spin_rate', 'game_date'] if c in df_valid.columns]
     idx = st.selectbox(
         "투구 선택",
         options=df_valid.index,
-        format_func=lambda i: " | ".join(str(df_valid.loc[i, c]) for c in show_cols)
+        format_func=lambda i: " | ".join(str(df_valid.loc[i, c]) for c in show_cols),
+        key=key,
     )
     row = df_valid.loc[idx]
     inp = {col: float(row[col]) for col in FEATURE_COLS}
@@ -1245,6 +1247,16 @@ with st.sidebar:
                         if df.empty:
                             st.warning("해당 기간 투구 기록이 없습니다. "
                                        "타자로만 뛴 기간일 수 있어요.")
+                        elif 'game_pk' in df.columns:
+                            render_pitch_mix(df)
+                            games = games_from_pitches(df)
+                            game_pk = st.selectbox(
+                                f"등판 ({len(games)}경기)", options=games.index,
+                                format_func=lambda g: games.loc[g, 'label'],
+                            )
+                            df_valid = prepare_pitches(df[df['game_pk'] == game_pk])
+                            if df_valid is not None:
+                                select_and_predict(df_valid, key=f"pitch_{game_pk}")
                         else:
                             render_pitch_mix(df)
                             select_and_predict_from_df(df)
