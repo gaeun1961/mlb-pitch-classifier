@@ -1314,21 +1314,26 @@ with st.sidebar:
                     f"최대 {MAX_DATE_ONLY_DAYS}일 범위까지만 지원합니다. 범위를 좁혀주세요."
                 )
             else:
-                with st.spinner(f"{start_d}~{end_d} 전체 투구 데이터를 가져오는 중…"):
-                    df = fetch_statcast_range(str(start_d), str(end_d))
+                _req = (str(start_d), str(end_d))
+                st.caption("리그 전체 투구를 받아 오므로 시간이 걸릴 수 있어요.")
+                if st.button("이 기간 조회", key="range_go"):
+                    st.session_state["_range_req"] = _req
+                if st.session_state.get("_range_req") == _req:
+                    with st.spinner(f"{start_d}~{end_d} 전체 투구 데이터를 가져오는 중…"):
+                        df = fetch_statcast_range(str(start_d), str(end_d))
 
-                if df.empty:
-                    st.warning("해당 기간에 투구 기록이 없습니다 (시즌 오프일 수 있습니다).")
-                else:
-                    total = len(df)
-                    if total > MAX_DATE_ONLY_ROWS:
-                        st.info(
-                            f"총 {total:,}건 중 {MAX_DATE_ONLY_ROWS}건만 표시합니다. "
-                            "날짜 범위를 좁히면 더 정확히 볼 수 있어요."
-                        )
-                        df = df.head(MAX_DATE_ONLY_ROWS)
-                    render_pitch_mix(df)
-                    select_and_predict_from_df(df)
+                    if df.empty:
+                        st.warning("해당 기간에 투구 기록이 없습니다 (시즌 오프일 수 있습니다).")
+                    else:
+                        total = len(df)
+                        if total > MAX_DATE_ONLY_ROWS:
+                            st.info(
+                                f"총 {total:,}건 중 {MAX_DATE_ONLY_ROWS}건만 표시합니다. "
+                                "날짜 범위를 좁히면 더 정확히 볼 수 있어요."
+                            )
+                            df = df.head(MAX_DATE_ONLY_ROWS)
+                        render_pitch_mix(df)
+                        select_and_predict_from_df(df)
 
     if input_mode == "직접 조작":
         st.markdown("---")
