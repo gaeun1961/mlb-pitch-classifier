@@ -125,6 +125,12 @@ CSS = """
 }
 
 html,body,[class*="css"]{font-family:var(--font);}
+/* 한글은 글자마다 줄바꿈되어 끝 글자만 다음 줄로 넘어가므로 단어 단위로 */
+[data-testid="stMarkdownContainer"] p,[data-testid="stCaptionContainer"] p,[data-testid="stCaptionContainer"],.pw-shap-sub,.pw-shap-expl,.pw-gnote{word-break:keep-all;overflow-wrap:break-word;}
+/* 선택 목록(드롭다운)은 사이드바 폭과 무관하게 내용만큼 넓게 펼친다 */
+/* 가상 스크롤 목록은 줄이 겹쳐 배치돼 max-content가 0으로 계산되므로 고정 최소 폭(가장 긴 항목 ≈ 25rem) */
+[data-testid="stSelectboxVirtualDropdown"]{width:auto !important;min-width:28rem;max-width:92vw;}
+[data-testid="stSelectboxVirtualDropdown"] [role="listbox"]{width:auto !important;min-width:100%;}
 .stApp{background:var(--bg);color:var(--text);}
 h1,h2,h3,h4{font-family:var(--font) !important;color:var(--text);text-wrap:balance;}
 #MainMenu,footer{visibility:hidden;}
@@ -177,7 +183,7 @@ div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--ac
 .pw-sum-meta span + span{margin-left:12px;}
 
 /* 구종별 확률 바 — 전부 회색, 예측 구종만 빨강 */
-.pw-bars{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;}
+.pw-bars{padding-bottom:12px;display:grid;grid-template-columns:1fr 1fr;column-gap:24px;}
 @media (max-width:640px){.pw-bars{grid-template-columns:1fr;}}
 .pw-bar-row{display:flex;align-items:center;gap:12px;margin:6px 0;}
 .pw-bar-name{width:84px;font-size:0.82rem;color:var(--text-2);flex:none;}
@@ -514,9 +520,32 @@ def career_label(c):
     return f"{c['name']} ({c['debut_year']}~{end}, 은퇴)"
 
 
-def pitcher_date_bounds(c):
-    """이 투수의 Statcast 조회 가능 날짜 범위(최소·최대)와 기본 조회 범위(최근 시즌)를 반환한다.
+@st.cache_data(show_spinner=False, ttl=3600)
+def last_game_date(player_id, from_year, to_year):
+    """MLB 경기 기록(정규시즌)에서 이 투수가 마지막으로 등판한 날. from_year부터 to_year까지
+    거꾸로 훑어 처음 등판 기록이 나오는 시즌의 마지막 날을 돌려준다(없거나 조회 실패면 None).
 
+    검색 API의 lastPlayedDate는 현역 선수에겐 비어 있어서 못 쓴다.
+    ponytail: 정규시즌만 — 포스트시즌 등판이 더 뒤여도 기본 종료일은 정규시즌 마지막 날(직접 늘릴 수 있음).
+    """
+    for year in range(from_year, to_year - 1, -1):
+        try:
+            r = requests.get(
+                f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats",
+                params={"stats": "gameLog", "group": "pitching", "season": year}, timeout=10)
+            r.raise_for_status()
+            splits = (r.json().get("stats") or [{}])[0].get("splits", [])
+        except requests.exceptions.RequestException:
+            return None
+        if splits:
+            return max(sp["date"] for sp in splits)
+    return None
+
+
+def pitcher_date_bounds(c):
+    """이 투수의 Statcast 조회 가능 날짜 범위(최소·최대)와 기본 조회 범위를 반환한다.
+
+    기본 범위 = 마지막으로 등판한 시즌 처음~마지막 등판일(등판 기록을 못 구하면 최근 시즌 전체).
     Statcast 시작일(2015-01-01) 이전에 은퇴한 선수는 None을 반환한다.
     """
     debut = date.fromisoformat(c["debut_date"])
@@ -532,8 +561,12 @@ def pitcher_date_bounds(c):
     if min_d > max_d:
         return None
 
-    def_start = max(date(max_d.year, 1, 1), min_d)
-    return min_d, max_d, def_start, max_d
+    def_end = max_d
+    last = last_game_date(c["id"], max_d.year, min_d.year)
+    if last:
+        def_end = min(max(date.fromisoformat(last), min_d), max_d)
+    def_start = max(date(def_end.year, 1, 1), min_d)
+    return min_d, max_d, def_start, def_end
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -698,7 +731,7 @@ def render_movement(inp):
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
         xaxis=dict(title='수평 (in)', range=[-30, 30], gridcolor=GRID,
                    zeroline=False, scaleanchor='y'),
-        yaxis=dict(title='수직 (in) · 위 라이징', range=[-30, 30],
+        yaxis=dict(title='수직 (in, 위가 라이징)', range=[-30, 30],
                    gridcolor=GRID, zeroline=False),
     )
     label_slot.markdown(
@@ -723,7 +756,7 @@ def render_strikezone(inp, clickable=False):
         "주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치"
     )
     st.markdown(
-        f'<div class="pw-label">스트라이크존{" · 클릭해서 위치 지정" if clickable else ""} {help_icon(tip)}</div>',
+        f'<div class="pw-label">스트라이크존{" (클릭해서 위치 지정)" if clickable else ""} {help_icon(tip)}</div>',
         unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
@@ -754,7 +787,7 @@ def render_strikezone(inp, clickable=False):
         height=300, margin=dict(l=40, r=8, t=8, b=32),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft) · 주심 시점', range=[-2.5, 2.5], gridcolor=GRID, constrain='domain',
+        xaxis=dict(title='좌우 (ft, 주심 시점)', range=[-2.5, 2.5], gridcolor=GRID, constrain='domain',
                    zeroline=False, scaleanchor='y'),
         yaxis=dict(title='높이 (ft)', range=[0, 7.5], gridcolor=GRID, zeroline=False),
     )
@@ -801,7 +834,7 @@ def render_paths(inp, p_throws):
         height=230, margin=dict(l=40, r=10, t=8, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='거리 (ft) · 측면뷰', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
+        xaxis=dict(title='거리 (ft, 측면뷰)', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
         yaxis=dict(title='높이 (ft)', range=[0, 8], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
@@ -818,7 +851,7 @@ def render_paths(inp, p_throws):
                    line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
     fig2.add_annotation(x=0, y=0, yshift=-12, text="투수판", showarrow=False,
                         font=dict(size=9, color=AXIS_TEXT))
-    fig2.add_annotation(x=0, y=PITCH_DIST + 3, text="타석 · 홈플레이트", showarrow=False,
+    fig2.add_annotation(x=0, y=PITCH_DIST + 3, text="타석 (홈플레이트)", showarrow=False,
                         font=dict(size=9, color=AXIS_TEXT))
     fig2.add_trace(go.Scatter(x=top_x, y=top_y, mode='lines', line=dict(color=ACCENT_HEX, width=3)))
     fig2.add_trace(go.Scatter(x=[top_x[0], top_x[-1]], y=[top_y[0], top_y[-1]],
@@ -828,9 +861,9 @@ def render_paths(inp, p_throws):
         height=290, margin=dict(l=40, r=10, t=8, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft) · 상단뷰 (주심 시점)', range=[-4, 4], gridcolor=GRID,
+        xaxis=dict(title='좌우 (ft, 상단뷰·주심 시점)', range=[-4, 4], gridcolor=GRID,
                    zeroline=False),
-        yaxis=dict(title='거리 (ft) · 아래 홈플레이트 → 위 투수판',
+        yaxis=dict(title='거리 (ft, 아래가 홈플레이트)',
                    range=[PITCH_DIST + 6, -4], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
@@ -851,7 +884,7 @@ def render_model_info():
 
     st.divider()
     st.markdown(
-        '<div class="pw-label">구종별 정밀도 · 재현율 · F1 '
+        '<div class="pw-label">구종별 정밀도, 재현율, F1 '
         + help_icon("2024~2025로 학습한 모델을 학습 때 전혀 보지 못한 2026시즌 "
                     "데이터(549,360건)에 평가한 실측값입니다. 위 요약 지표(투수 단위 5-fold, 처음 보는 투수 기준)와는 "
                     "평가 방식이 달라 서로 직접 비교하지 마세요.") + '</div>',
@@ -1012,12 +1045,14 @@ def _explanation_body():
         st.markdown(f'<p class="pw-shap-expl">{html.escape(explanation)}</p>', unsafe_allow_html=True)
     elif st.session_state.get('_explain_future') is not None:
         st.caption("설명 생성 중…")
+    else:
+        st.caption("설명을 불러오지 못했습니다. 아래 기여도 목록으로 확인해 주세요.")
 
 
 def render_shap_panel(attribution, conf, label):
     st.markdown(
         '<div class="pw-shap-head">예측 근거 (SHAP)</div>'
-        '<div class="pw-shap-sub">각 특성이 이 예측 확률을 얼마나 올리고 내렸는지</div>',
+        '<div class="pw-shap-sub">각 특성이 예측 확률을 올리고 내린 정도</div>',
         unsafe_allow_html=True,
     )
     if not attribution or not conf or not label:
@@ -1026,7 +1061,8 @@ def render_shap_panel(attribution, conf, label):
 
     pending = st.session_state.get('_explain_future') is not None
     st.session_state['_explain_polling'] = pending
-    st.fragment(_explanation_body, run_every=1 if pending else None)()
+    with st.expander("AI 설명 보기"):
+        st.fragment(_explanation_body, run_every=1 if pending else None)()
 
     base, contribs = _waterfall_contribs(attribution, conf)
     ordered = sorted(contribs.items(), key=lambda kv: abs(kv[1]), reverse=True)
@@ -1110,32 +1146,32 @@ with st.sidebar:
 
     if _manual:
         spd = st.slider("구속 (mph)", 60.0, 105.0, float(st.session_state.inp['release_speed']),
-                        0.5, help="공이 손을 떠나는 순간의 속도 · 빠를수록 FF/FC 계열, "
+                        0.5, format="%.1f", help="공이 손을 떠나는 순간의 속도 · 빠를수록 FF/FC 계열, "
                                   "느릴수록 커브 등 변화구 계열로 기울어짐")
         spin = st.slider("스핀레이트 (rpm)", 1000.0, 3500.0,
-                         float(st.session_state.inp['release_spin_rate']), 10.0,
+                         float(st.session_state.inp['release_spin_rate']), 10.0, format="%.0f",
                          help="공의 분당 회전수 · 높을수록 포심/커터 계열로 기울어짐 "
                               "(회전 방향은 아래 회전축 슬라이더가 따로 담당)")
         spin_axis = st.slider("회전축 (°)", 0.0, 360.0,
-                              float(st.session_state.inp['spin_axis']), 5.0,
+                              float(st.session_state.inp['spin_axis']), 5.0, format="%.0f",
                               help="회전축 방향(시계 방향, 0–360°) · ax·az와 별개로 판별에 큰 영향 · "
                                    "2026 실측 평균: 포심 215° 싱커 225° 체인지업 242° 스플리터 238° "
                                    "커터 185° 슬라이더 122°(편차 큼) 커브 44°")
-        ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, key="ax_slider",
+        ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, format="%.1f", key="ax_slider",
                         help="우완 기준 패스트볼 계열은 음수, 변화구 계열(SL·CU·FC)은 양수 쪽 · "
                              "스트라이크존을 클릭하면 자동으로 맞춰집니다")
-        az = st.slider("수직 무브먼트 (az)", *AZ_RANGE, step=0.5, key="az_slider",
+        az = st.slider("수직 무브먼트 (az)", *AZ_RANGE, step=0.5, format="%.1f", key="az_slider",
                        help="양수=포심(떠오름), 음수=싱커(가라앉음) · 실측은 약 -50에서 0 사이 · "
                             "존 클릭 시엔 그 위치에 닿도록 범위 밖 값 가능")
         ext = st.slider("릴리스 익스텐션 (ft)", 4.5, 8.0,
-                        float(st.session_state.inp['release_extension']), 0.1,
+                        float(st.session_state.inp['release_extension']), 0.1, format="%.1f",
                         help="투수판에서 릴리스 지점까지 앞으로 나온 거리 · 클수록 "
                              "홈플레이트에 더 가까이서 공을 놓음")
-        rx = st.slider("릴리스 좌우 (ft)", *RX_RANGE, step=0.1, key="rx_slider",
+        rx = st.slider("릴리스 좌우 (ft)", *RX_RANGE, step=0.1, format="%.1f", key="rx_slider",
                        help="홈플레이트 중심 기준 릴리스 지점의 좌우 위치 · 투구 손과 자동 연동 · "
                             "음수 = 우완(1루쪽), 양수 = 좌완(3루쪽)")
         rz = st.slider("릴리스 높이 (ft)", 3.5, 7.2,
-                       float(st.session_state.inp['release_pos_z']), 0.1,
+                       float(st.session_state.inp['release_pos_z']), 0.1, format="%.1f",
                        help="공을 놓는 지점의 지면 기준 높이 · 암슬롯을 반영하며 높을수록 "
                             "오버핸드, 낮을수록 사이드암 쪽")
 
@@ -1190,7 +1226,7 @@ with st.sidebar:
                     st.rerun()
 
         query = st.text_input(
-            "투수 이름 (2글자 이상, 영어 · 비워두면 날짜로만 검색)",
+            "투수 이름 (영어 2글자 이상, 비우면 날짜로 검색)",
             placeholder="Gerrit Cole", key="pitcher_query",
         ).strip()
 
@@ -1228,9 +1264,11 @@ with st.sidebar:
                     min_d, max_d, def_start, def_end = bounds
                     dc1, dc2 = st.columns(2)
                     start_d = dc1.date_input("시작일", value=def_start,
-                                              min_value=min_d, max_value=max_d, key="pitcher_start")
+                                              min_value=min_d, max_value=max_d,
+                                              key=f"pitcher_start_{chosen['id']}")
                     end_d = dc2.date_input("종료일", value=def_end,
-                                            min_value=min_d, max_value=max_d, key="pitcher_end")
+                                            min_value=min_d, max_value=max_d,
+                                            key=f"pitcher_end_{chosen['id']}")
 
                     if start_d > end_d:
                         st.error("시작일이 종료일보다 늦을 수 없습니다.")
@@ -1318,8 +1356,7 @@ with left:
     with tab_dash:
         summary_card()
         if label and proba:
-            with st.container(border=True):
-                render_prob_dist(proba, label)
+            render_prob_dist(proba, label)
             c_mv, c_zone = st.columns(2)
             with c_mv, st.container(border=True):
                 render_movement(inp)
