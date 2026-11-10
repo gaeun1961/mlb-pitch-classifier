@@ -177,7 +177,9 @@ div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--ac
 .pw-sum-meta span + span{margin-left:12px;}
 
 /* 구종별 확률 바 — 전부 회색, 예측 구종만 빨강 */
-.pw-bar-row{display:flex;align-items:center;gap:12px;margin:8px 0;}
+.pw-bars{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;}
+@media (max-width:640px){.pw-bars{grid-template-columns:1fr;}}
+.pw-bar-row{display:flex;align-items:center;gap:12px;margin:6px 0;}
 .pw-bar-name{width:84px;font-size:0.82rem;color:var(--text-2);flex:none;}
 .pw-bar-track{flex:1;height:8px;background:var(--track);border-radius:2px;overflow:hidden;}
 .pw-bar-fill{display:block;height:100%;border-radius:2px;}
@@ -631,7 +633,7 @@ def render_prob_dist(proba, label):
             f'<span class="pw-bar-pct">{v:.0f}%</span>'
             '</div>'
         )
-    st.markdown(rows, unsafe_allow_html=True)
+    st.markdown(f'<div class="pw-bars">{rows}</div>', unsafe_allow_html=True)
 
 
 def render_movement(inp):
@@ -641,12 +643,7 @@ def render_movement(inp):
     - 실제 투구 모드: 회색 점(투구 분포)과 빨간 링 모두 Statcast 실측 pfx_x·pfx_z(×12).
     - 가상 입력 모드: 빨간 링·회색 점(세션 이력)은 _pfx_inches 계산값.
     구종별 회색 원도 _pfx_inches 계산값이며, 계산식이 실측 pfx와 같은 좌표계라 모두 겹쳐 비교할 수 있다."""
-    st.markdown(
-        '<div class="pw-label">무브먼트 차트 (유도 무브먼트, in) '
-        + help_icon("회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 "
-                    "이 차트에 없는 회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 "
-                    "떨어져 보일 수 있습니다.") + '</div>',
-        unsafe_allow_html=True)
+    label_slot = st.empty()   # 도움말에 아래에서 정해지는 범례(ctx)를 넣으려고 자리만 먼저 잡는다
     bg = st.session_state.get('movement_bg')
     hist = st.session_state.history
     label = st.session_state.label
@@ -662,10 +659,10 @@ def render_movement(inp):
         cx, cy = _pfx_inches(*ref)
         hot = code == label
         # add_shape는 호버를 못 받으므로, 마우스오버 시 구종명이 뜨도록 큰 마커의
-        # scatter로 그린다(반경 4.5인치 ≈ 이 차트 스케일에서 지름 50px 근사).
+        # scatter로 그린다(반경 4.5인치 ≈ 이 차트 스케일에서 지름 40px 근사).
         fig.add_trace(go.Scatter(
             x=[cx], y=[cy], mode='markers', showlegend=False,
-            marker=dict(size=50, color="rgba(140,143,152,0.10)",
+            marker=dict(size=40, color="rgba(140,143,152,0.10)",
                         line=dict(color=ACCENT_HEX if hot else "rgba(140,143,152,0.45)",
                                   width=2 if hot else 1)),
             hovertemplate=f"{PITCH_NAMES.get(code, code)}<extra></extra>",
@@ -696,16 +693,22 @@ def render_movement(inp):
     fig.add_trace(go.Scatter(x=[px], y=[py], mode='markers',
                              marker=dict(size=7, color=ACCENT_HEX)))
     fig.update_layout(
-        height=380, margin=dict(l=44, r=20, t=10, b=38),
+        height=300, margin=dict(l=44, r=8, t=8, b=38),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='수평 무브먼트 (in)', range=[-30, 30], gridcolor=GRID,
+        xaxis=dict(title='수평 (in)', range=[-30, 30], gridcolor=GRID,
                    zeroline=False, scaleanchor='y'),
-        yaxis=dict(title='수직 무브먼트 (in) · 위 라이징 / 아래 드롭', range=[-30, 30],
+        yaxis=dict(title='수직 (in) · 위 라이징', range=[-30, 30],
                    gridcolor=GRID, zeroline=False),
     )
+    label_slot.markdown(
+        '<div class="pw-label">무브먼트 (유도 무브먼트, in) '
+        + help_icon(f"점선 원 = 12·24인치, 회색 원 = 구종별 대략 위치(예측 구종은 빨강). {ctx}. "
+                    "회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 이 차트에 없는 "
+                    "회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 "
+                    "떨어져 보일 수 있습니다.") + '</div>',
+        unsafe_allow_html=True)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강) · {ctx}")
 
 
 def render_strikezone(inp, clickable=False):
@@ -714,12 +717,13 @@ def render_strikezone(inp, clickable=False):
     tip = (
         "좌우(ax)·수직(az) 무브먼트 슬라이더가 클릭한 위치에 실제로 도달하도록 역산되어 "
         "바뀝니다 — 구종이 무엇이 되는지는 신경 쓰지 않고, 그 위치에 맞는 움직임 값을 그대로 "
-        "반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다."
+        "반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다. "
+        "구속·회전수·익스텐션은 그대로 유지됩니다. 회색 점 = 릴리스, 빨간 점 = 플레이트 통과 위치."
         if clickable else
         "주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치"
     )
     st.markdown(
-        f'<div class="pw-label">로케이션 · 스트라이크존 {help_icon(tip)}</div>',
+        f'<div class="pw-label">스트라이크존{" · 클릭해서 위치 지정" if clickable else ""} {help_icon(tip)}</div>',
         unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
@@ -727,11 +731,11 @@ def render_strikezone(inp, clickable=False):
                   line=dict(color=ZONE_LINE, width=2),
                   fillcolor="rgba(138,143,152,0.06)", layer="below")
     if clickable:
-        # 옅은 격자 = 클릭 히트타깃(≈0.15ft 간격). 클릭하면 가장 가까운 점이 선택된다.
+        # 옅은 격자 = 클릭 히트타깃(≈0.15ft 간격 ≈ 이 차트 크기에서 5px). 클릭하면 가장 가까운 점이 선택된다.
         # 완전 투명 + hoverinfo='skip'이면 Plotly가 클릭 이벤트를 안 잡으므로 옅게라도 그린다.
         gx, gy = np.meshgrid(np.arange(-1.8, 1.81, 0.15), np.arange(0.3, 4.81, 0.15))
         fig.add_trace(go.Scatter(x=gx.ravel(), y=gy.ravel(), mode='markers',
-                                 name='click', marker=dict(size=16, color='rgba(140,143,152,0.16)'),
+                                 name='click', marker=dict(size=6, color='rgba(140,143,152,0.10)'),
                                  hoverinfo='none'))
     # 릴리스 지점(회색). plate_x/release_pos_x는 Statcast와 같은 포수·주심 시점 좌표
     fig.add_trace(go.Scatter(
@@ -747,24 +751,26 @@ def render_strikezone(inp, clickable=False):
         hoverinfo='skip',
     ))
     fig.update_layout(
-        height=400, margin=dict(l=40, r=10, t=10, b=32),
+        height=300, margin=dict(l=40, r=8, t=8, b=32),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft) · 주심 시점', range=[-2.5, 2.5], gridcolor=GRID,
+        xaxis=dict(title='좌우 (ft) · 주심 시점', range=[-2.5, 2.5], gridcolor=GRID, constrain='domain',
                    zeroline=False, scaleanchor='y'),
         yaxis=dict(title='높이 (ft)', range=[0, 7.5], gridcolor=GRID, zeroline=False),
     )
     if clickable:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False},
                         on_select="rerun", selection_mode="points", key="zone_click")
-        st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지")
     else:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
 def render_paths(inp, p_throws):
     """측면뷰·상단뷰 궤적. 홈플레이트에 스트라이크존 박스로 존 대비 위치를 표시한다."""
-    st.markdown('<div class="pw-label">투구 궤적</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pw-label">투구 궤적 '
+                + help_icon("위 = 측면뷰, 아래 = 위에서 내려다본 상단뷰(주심 시점). 회색 사각형 = 홈플레이트 "
+                            "스트라이크존, 빨간 점 = 릴리스·플레이트 통과 지점.") + '</div>',
+                unsafe_allow_html=True)
     side_x, side_z = compute_trajectory_side(inp)
     top_y, top_x = compute_trajectory_top(inp, p_throws)
 
@@ -785,14 +791,14 @@ def render_paths(inp, p_throws):
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=0.6, line=dict(color=ZONE_LINE, width=5))
     fig.add_annotation(x=0, y=0.6, yshift=9, text="투수판", showarrow=False,
                        font=dict(size=9, color=AXIS_TEXT))
-    fig.add_annotation(x=PITCH_DIST, y=3.5, yshift=10, text="홈플레이트", showarrow=False,
+    fig.add_annotation(x=PITCH_DIST, y=3.5, yshift=10, xanchor='right', text="홈플레이트", showarrow=False,
                        font=dict(size=9, color=AXIS_TEXT))
     fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
                              line=dict(color=ACCENT_HEX, width=3)))
     fig.add_trace(go.Scatter(x=[side_x[0], side_x[-1]], y=[side_z[0], side_z[-1]],
                              mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
     fig.update_layout(
-        height=300, margin=dict(l=40, r=10, t=10, b=30),
+        height=230, margin=dict(l=40, r=10, t=8, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
         xaxis=dict(title='거리 (ft) · 측면뷰', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
@@ -819,7 +825,7 @@ def render_paths(inp, p_throws):
                               mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
     fig2.add_vline(x=0, line_dash='dash', line_color=GRID)
     fig2.update_layout(
-        height=440, margin=dict(l=40, r=10, t=10, b=30),
+        height=290, margin=dict(l=40, r=10, t=8, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
         xaxis=dict(title='좌우 (ft) · 상단뷰 (주심 시점)', range=[-4, 4], gridcolor=GRID,
@@ -828,7 +834,6 @@ def render_paths(inp, p_throws):
                    range=[PITCH_DIST + 6, -4], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
-    st.caption("회색 사각형 = 홈플레이트 스트라이크존 · 빨간 점 = 릴리스·플레이트 통과 지점")
 
 
 def render_model_info():
@@ -1315,8 +1320,11 @@ with left:
         if label and proba:
             with st.container(border=True):
                 render_prob_dist(proba, label)
-            with st.container(border=True):
+            c_mv, c_zone = st.columns(2)
+            with c_mv, st.container(border=True):
                 render_movement(inp)
+            with c_zone, st.container(border=True):
+                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
         else:
             with st.container(border=True):
                 st.markdown("사이드바에서 값을 조절하거나 투수를 선택하면 "
@@ -1324,9 +1332,6 @@ with left:
 
     with tab_traj:
         summary_card()
-        if label and proba:
-            with st.container(border=True):
-                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
         with st.container(border=True):
             render_paths(inp, st.session_state.p_throws)
 
