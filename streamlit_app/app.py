@@ -179,6 +179,12 @@ div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--ac
   padding-bottom:12px;border-bottom:1px solid var(--rule);}
 .pw-sum-pred{font-size:1.9rem;font-weight:700;color:var(--accent);line-height:1.1;}
 .pw-sum-conf{font-size:1.1rem;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.pw-sum-actual{font-size:0.9rem;font-weight:600;color:var(--text-2);}
+.pw-sum-actual.bad{color:var(--accent);}
+/* 투구 이동 줄은 좁은 화면에서도 한 줄 유지 */
+.st-key-pitch_nav [data-testid="stHorizontalBlock"]{flex-wrap:nowrap;align-items:center;}
+.st-key-pitch_nav [data-testid="stColumn"]{min-width:0;}
+.pw-nav{text-align:center;font-size:0.85rem;color:var(--text-2);font-variant-numeric:tabular-nums;}
 .pw-sum-meta{flex-basis:100%;font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;}
 .pw-sum-meta span + span{margin-left:12px;}
 
@@ -435,22 +441,99 @@ def prepare_pitches(df):
     return df_valid
 
 
+EXTRA_PITCH_NAMES = {'ST': '스위퍼', 'KC': '너클커브', 'SV': '슬러브', 'FO': '포크볼',
+                     'KN': '너클볼', 'EP': '이퓨스', 'CS': '슬로 커브'}
+RESULT_KR = {'ball': '볼', 'blocked_ball': '볼', 'called_strike': '스트라이크', 'swinging_strike': '헛스윙',
+             'swinging_strike_blocked': '헛스윙', 'foul': '파울', 'foul_tip': '파울팁', 'foul_bunt': '파울',
+             'hit_into_play': '인플레이', 'hit_by_pitch': '몸에 맞는 공', 'automatic_ball': '볼',
+             'automatic_strike': '스트라이크', 'missed_bunt': '헛스윙', 'pitchout': '피치아웃'}
+
+
+def pitch_name(code):
+    return PITCH_NAMES.get(code) or EXTRA_PITCH_NAMES.get(code) or str(code)
+
+
+def pitch_table(df):
+    """투구 목록 표. 경기 데이터(이닝·타석 등)가 있으면 그 열, 없으면(CSV 등) 있는 열만."""
+    c, t = df.columns, {}
+
+    def num(col):
+        return pd.to_numeric(df[col], errors='coerce').astype('Int64')
+
+    game = 'inning' in c
+    if game:
+        half = df['inning_topbot'].map({'Top': '초', 'Bot': '말'}).fillna('') if 'inning_topbot' in c else ''
+        t['이닝'] = num('inning').astype(str) + '회' + half
+    if 'at_bat_number' in c:
+        t['타석'] = num('at_bat_number')
+    if 'pitch_number' in c:
+        t['구'] = num('pitch_number')
+    if 'balls' in c and 'strikes' in c:
+        t['카운트'] = num('balls').astype(str) + '-' + num('strikes').astype(str)
+    if 'stand' in c:
+        t['타자'] = df['stand'].map({'L': '좌', 'R': '우'}).fillna('')
+    if not game and 'player_name' in c:
+        t['투수'] = df['player_name']
+    if not game and 'game_date' in c:
+        t['날짜'] = df['game_date'].astype(str).str[:10]
+    if 'pitch_type' in c:
+        t['실제 구종'] = df['pitch_type'].map(lambda x: pitch_name(x) if pd.notna(x) else '')
+    t['구속'] = df['release_speed'].round(1)
+    if not game and 'release_spin_rate' in c:
+        t['회전수'] = df['release_spin_rate'].round(0).astype('Int64')
+    if 'description' in c:
+        t['결과'] = df['description'].map(lambda x: RESULT_KR.get(x, x) if pd.notna(x) else '')
+    return pd.DataFrame(t)
+
+
+def _step_pitch(d, n, tkey):
+    """이전·다음 버튼: 표의 선택 행을 옮긴다(콜백이라 이번 실행의 위젯 생성 전에 반영됨)."""
+    s = st.session_state.get(tkey)
+    cur = s["selection"]["rows"][0] if s and s["selection"]["rows"] else 0
+    st.session_state[tkey] = {"selection": {"rows": [min(max(cur + d, 0), n - 1)], "columns": []}}
+
+
+def _pitch_info(row):
+    """'5회초, 우타자, 카운트 2-1' — 있는 정보만."""
+    out = []
+    if pd.notna(row.get('inning')):
+        out.append(f"{int(row['inning'])}회{'초' if row.get('inning_topbot') == 'Top' else '말'}")
+    if row.get('stand') in ('L', 'R'):
+        out.append('좌타자' if row['stand'] == 'L' else '우타자')
+    if pd.notna(row.get('balls')) and pd.notna(row.get('strikes')):
+        out.append(f"카운트 {int(row['balls'])}-{int(row['strikes'])}")
+    return ", ".join(out)
+
+
 def select_and_predict(df_valid, key=None):
-    """prepare_pitches를 거친 DataFrame에서 투구를 고르게 하고, 선택된 투구로 예측을 실행한다.
-    key를 바꾸면(예: 경기별) 새 위젯이 되어 선택이 첫 투구로 초기화된다."""
-    show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
-                              'release_spin_rate', 'game_date'] if c in df_valid.columns]
-    idx = st.selectbox(
-        "투구 선택",
-        options=df_valid.index,
-        format_func=lambda i: " | ".join(str(df_valid.loc[i, c]) for c in show_cols),
-        key=key,
-    )
-    row = df_valid.loc[idx]
+    """prepare_pitches를 거친 DataFrame에서 현재 투구를 정하고 예측을 실행한다.
+    현재 투구 = '투구 목록' 표의 선택 행(표 클릭·이전/다음 버튼 모두 이 한 곳을 바꾼다).
+    key를 바꾸면(예: 경기별) 선택이 첫 투구로 초기화된다."""
+    if {'at_bat_number', 'pitch_number'} <= set(df_valid.columns):
+        df_valid = df_valid.sort_values(['at_bat_number', 'pitch_number']).reset_index(drop=True)
+    n = len(df_valid)
+    sig = key or f"df{n}"
+    tkey = f"pitch_tbl_{sig}"
+    state = st.session_state.get(tkey)
+    rows = state["selection"]["rows"] if state else []
+    if st.session_state.get("_pitch_sig") != sig:
+        idx = 0
+    else:   # 선택 해제(같은 행 재클릭)는 직전 선택 유지
+        idx = rows[0] if rows else st.session_state.get("_pitch_idx", 0)
+    idx = min(max(idx, 0), n - 1)
+    st.session_state["_pitch_sig"], st.session_state["_pitch_idx"] = sig, idx
+    st.session_state[tkey] = {"selection": {"rows": [idx], "columns": []}}
+
+    row = df_valid.iloc[idx]
+    st.session_state["_pitch_nav"] = dict(n=n, idx=idx, tkey=tkey, table=pitch_table(df_valid),
+                                          info=_pitch_info(row))
+    pt = row.get('pitch_type')
+    st.session_state["actual_pitch"] = pt if isinstance(pt, str) else None
     inp = {col: float(row[col]) for col in FEATURE_COLS}
     st.session_state.inp = inp
     if 'p_throws' in df_valid.columns:
         st.session_state.p_throws = str(row.get('p_throws', 'R'))
+    st.caption(f"현재 투구 {idx + 1} / {n}. 메인 화면 위의 이전·다음 버튼이나 '투구 목록' 탭에서 바꿉니다.")
     run_prediction(inp)
 
 
@@ -637,11 +720,17 @@ def render_guide(p_throws):
     )
 
 
-def render_summary(label, conf, inf_ms):
+def render_summary(label, conf, inf_ms, actual=None):
+    actual_html = ''
+    if actual:
+        verdict = ("일치" if actual == label else "불일치") if actual in PITCH_NAMES else "모델 7구종 밖"
+        actual_html = (f'<span class="pw-sum-actual {"bad" if actual in PITCH_NAMES and actual != label else ""}">'
+                       f'실제 구종 {pitch_name(actual)} ({verdict})</span>')
     st.markdown(
         '<div class="pw-summary">'
         f'<span class="pw-sum-pred">{PITCH_NAMES.get(label, label)}</span>'
         f'<span class="pw-sum-conf">신뢰도 {conf * 100:.0f}%</span>'
+        f'{actual_html}'
         '<span class="pw-sum-meta"><span>모델 정확도 86.0% (처음 보는 투수 기준)</span>'
         f'<span>추론 {inf_ms:.0f}ms</span></span>'
         '</div>',
@@ -1086,6 +1175,10 @@ def render_shap_panel(attribution, conf, label):
         render_feature_card(f, c, mx, label)
 
 
+# 투구 탐색 상태는 매 실행마다 사이드바(select_and_predict)가 다시 채운다 — 직접 조작 모드에선 비어 있음
+st.session_state["_pitch_nav"] = None
+st.session_state["actual_pitch"] = None
+
 # ── 사이드바: 입력 컨트롤 ────────────────────────────────
 with st.sidebar:
     st.markdown(LOGO_HTML, unsafe_allow_html=True)
@@ -1350,13 +1443,28 @@ def summary_card():
     """예측 요약 스트립 — 각 탭 바 바로 아래에 반복 렌더해 어느 탭에서도 보이게 한다.
     칩 자체가 테두리를 가지므로 바깥 카드로 한 번 더 감싸지 않는다(이중 박스 방지)."""
     if label:
-        render_summary(label, conf, inf_ms)
+        render_summary(label, conf, inf_ms, st.session_state.get('actual_pitch'))
 
 
 left, right = st.columns([2.2, 1], gap="large")
 
+nav = st.session_state.get("_pitch_nav")
+
 with left:
-    tab_dash, tab_traj, tab_model = st.tabs(["대시보드", "궤적 분석", "모델 정보"])
+    if nav:
+        with st.container(key="pitch_nav"):
+            c_prev, c_mid, c_next = st.columns([1, 2.4, 1])
+            c_prev.button("이전", icon=":material/chevron_left:", on_click=_step_pitch,
+                          args=(-1, nav["n"], nav["tkey"]), disabled=nav["idx"] == 0,
+                          use_container_width=True, key="pitch_prev")
+            c_mid.markdown(f'<div class="pw-nav"><b>{nav["idx"] + 1} / {nav["n"]}구</b><br>{nav["info"]}</div>',
+                           unsafe_allow_html=True)
+            c_next.button("다음", icon=":material/chevron_right:", on_click=_step_pitch,
+                          args=(1, nav["n"], nav["tkey"]), disabled=nav["idx"] == nav["n"] - 1,
+                          use_container_width=True, key="pitch_next")
+    tab_names = ["대시보드", "궤적 분석"] + (["투구 목록"] if nav else []) + ["모델 정보"]
+    tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    tab_dash, tab_traj, tab_model = tabs["대시보드"], tabs["궤적 분석"], tabs["모델 정보"]
 
     with tab_dash:
         summary_card()
@@ -1376,6 +1484,15 @@ with left:
         summary_card()
         with st.container(border=True):
             render_paths(inp, st.session_state.p_throws)
+
+    if nav:
+        with tabs["투구 목록"]:
+            summary_card()
+            st.dataframe(nav["table"], on_select="rerun", selection_mode="single-row", key=nav["tkey"],
+                         hide_index=True, use_container_width=True,
+                         column_config={"구속": st.column_config.NumberColumn(format="%.1f")},
+                         height=min(36 * (nav["n"] + 1) + 3, 460))
+            st.caption("행을 누르면 그 투구로 바뀝니다. 표는 투구 순서(타석, 구)대로입니다.")
 
     with tab_model:
         summary_card()
