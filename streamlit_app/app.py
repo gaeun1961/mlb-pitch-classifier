@@ -592,6 +592,25 @@ def search_pitchers(query):
     return candidates[:15]
 
 
+@st.cache_data(show_spinner=False, ttl=3600)
+def top_pitchers(limit=10):
+    """MLB 순위 API의 최근 시즌 탈삼진 상위 투수(이름을 모를 때 고를 후보). 올해 기록이 없으면 작년."""
+    for year in (date.today().year, date.today().year - 1):
+        r = requests.get("https://statsapi.mlb.com/api/v1/stats/leaders", timeout=10, params={
+            "leaderCategories": "strikeouts", "season": year, "statGroup": "pitching",
+            "sportId": 1, "limit": limit})
+        r.raise_for_status()
+        leaders = (r.json().get("leagueLeaders") or [{}])[0].get("leaders", [])
+        if leaders:
+            return [{"id": l["person"]["id"], "name": l["person"]["fullName"],
+                     "team": l.get("team", {}).get("name", ""), "k": l["value"]} for l in leaders]
+    return []
+
+
+def _pick_pitcher(name):
+    st.session_state.pitcher_query = name
+
+
 STATCAST_START_YEAR = 2015
 STATCAST_START_DATE = date(STATCAST_START_YEAR, 1, 1)
 MAX_DATE_ONLY_DAYS = 5      # 이름 없이 날짜만으로 검색할 때 허용하는 최대 기간(리그 전체 조회라 무거움)
@@ -1397,6 +1416,17 @@ with st.sidebar:
                 if st.button(f.get('label', f['name']), key=f"favbtn_{f['id']}", use_container_width=True):
                     st.session_state.pitcher_query = f['name']
                     st.rerun()
+
+        try:
+            tops = top_pitchers()
+        except requests.exceptions.RequestException:
+            tops = []   # 추천은 보조 기능 — 실패하면 그냥 숨긴다
+        if tops:
+            with st.expander("이름을 모르면? 탈삼진 상위 투수"):
+                st.caption("괄호 안은 탈삼진 수. 누르면 이름이 입력됩니다.")
+                for t in tops:
+                    st.button(f"{t['name']} ({t['k']})", key=f"top_{t['id']}", help=t['team'],
+                              use_container_width=True, on_click=_pick_pitcher, args=(t['name'],))
 
         query = st.text_input(
             "투수 이름 (영어 2글자 이상, 비우면 날짜로 검색)",
