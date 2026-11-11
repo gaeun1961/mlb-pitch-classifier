@@ -11,6 +11,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from utils import (
     predict, explain, compute_trajectory_side, compute_trajectory_top,
@@ -890,11 +891,15 @@ def render_strikezone(inp, clickable=False):
 
 
 def render_paths(inp, p_throws):
-    """측면뷰·상단뷰 궤적. 홈플레이트에 스트라이크존 박스로 존 대비 위치를 표시한다."""
+    """투구 궤적을 한 차트에 묶고 재생 버튼 하나로 동시에 움직인다.
+    측면뷰·상단뷰 = 투수판에서 홈플레이트로 날아가는 모양, 주심 시점 = 날아와서 점점 커지는 공."""
     st.markdown('<div class="pw-label">투구 궤적 '
-                + help_icon("위 = 측면뷰, 아래 = 위에서 내려다본 상단뷰(주심 시점). 회색 사각형 = 홈플레이트 "
-                            "스트라이크존, 빨간 점 = 릴리스·플레이트 통과 지점.") + '</div>',
+                + help_icon("재생을 누르면 공이 날아갑니다. 측면뷰와 상단뷰는 투수판에서 홈플레이트로 날아가는 모양, "
+                            "주심 시점은 공이 날아와 점점 커지는 모양입니다. 회색 사각형 = 스트라이크존. "
+                            "재생 버튼은 마우스·터치용이며, 자동으로 재생되지 않습니다.") + '</div>',
                 unsafe_allow_html=True)
+    speed = st.radio("재생 속도", ["슬로모션", "실제 속도"], horizontal=True, key="traj_speed",
+                     label_visibility="collapsed")
     side_x, side_z = compute_trajectory_side(inp)
     top_y, top_x = compute_trajectory_top(inp, p_throws)
 
@@ -903,61 +908,77 @@ def render_paths(inp, p_throws):
     w = np.linspace(0.0, 1.0, len(top_x))
     top_x = np.asarray(top_x) + (inp['plate_x'] - top_x[-1]) * w
     side_z = np.asarray(side_z) + (inp['plate_z'] - side_z[-1]) * w
+    top_y = np.asarray(top_y)
+    n = len(top_x)
 
-    fig = go.Figure()
-    # 스트라이크존 높이 1.5~3.5ft: 전 구간 가로 점선 + 홈플레이트에 채운 존 박스
-    fig.add_hline(y=1.5, line_dash="dot", line_color=ZONE_LINE, line_width=1)
-    fig.add_hline(y=3.5, line_dash="dot", line_color=ZONE_LINE, line_width=1)
-    fig.add_shape(type="rect", x0=PITCH_DIST - 1.5, x1=PITCH_DIST, y0=1.5, y1=3.5,
-                  line=dict(color=ZONE_LINE, width=2),
-                  fillcolor="rgba(140,143,152,0.14)", layer="below")
-    # 투수판(거리 0) · 홈플레이트(거리 60.5)
-    fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=0.6, line=dict(color=ZONE_LINE, width=5))
-    fig.add_annotation(x=0, y=0.6, yshift=9, text="투수판", showarrow=False,
-                       font=dict(size=9, color=AXIS_TEXT))
-    fig.add_annotation(x=PITCH_DIST, y=3.5, yshift=10, xanchor='right', text="홈플레이트", showarrow=False,
-                       font=dict(size=9, color=AXIS_TEXT))
-    fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
-                             line=dict(color=ACCENT_HEX, width=3)))
-    fig.add_trace(go.Scatter(x=[side_x[0], side_x[-1]], y=[side_z[0], side_z[-1]],
-                             mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
+    fig = make_subplots(rows=2, cols=2, specs=[[{"colspan": 2}, None], [{}, {}]],
+                        row_heights=[0.36, 0.64], vertical_spacing=0.16, horizontal_spacing=0.12,
+                        subplot_titles=("측면뷰", "상단뷰", "주심 시점"))
+    fig.update_annotations(font=dict(size=12, color=AXIS_TEXT))   # 소제목 스타일 (정적 주석은 아래서 추가)
+
+    # ── 정적 배경 ──
+    # 측면: 스트라이크존 높이 1.5~3.5ft 점선 + 홈플레이트 존 박스 + 투수판
+    for yy in (1.5, 3.5):
+        fig.add_hline(y=yy, line_dash="dot", line_color=ZONE_LINE, line_width=1, row=1, col=1)
+    fig.add_shape(type="rect", x0=PITCH_DIST - 1.5, x1=PITCH_DIST, y0=1.5, y1=3.5, line=dict(color=ZONE_LINE, width=2),
+                  fillcolor="rgba(140,143,152,0.14)", layer="below", row=1, col=1)
+    fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=0.6, line=dict(color=ZONE_LINE, width=5), row=1, col=1)
+    # 상단: 타석 양옆, 홈플레이트 존 폭, 투수판
+    for x0, x1 in ((0.83, 5), (-5, -0.83)):
+        fig.add_shape(type="rect", x0=x0, x1=x1, y0=PITCH_DIST - 3, y1=PITCH_DIST + 1.5,
+                      fillcolor="rgba(140,143,152,0.08)", line_width=0, layer="below", row=2, col=1)
+    fig.add_shape(type="line", x0=-1, x1=1, y0=0, y1=0, line=dict(color=ZONE_LINE, width=5), row=2, col=1)
+    fig.add_shape(type="rect", x0=-0.83, x1=0.83, y0=PITCH_DIST - 1.7, y1=PITCH_DIST, line=dict(color=ZONE_LINE, width=1.8),
+                  fillcolor="rgba(0,0,0,0)", layer="below", row=2, col=1)
+    fig.add_vline(x=0, line_dash='dash', line_color=GRID, row=2, col=1)
+    # 주심 시점: 스트라이크존
+    fig.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5, line=dict(color=ZONE_LINE, width=2),
+                  fillcolor="rgba(138,143,152,0.06)", layer="below", row=2, col=2)
+
+    paths = [(side_x, side_z, 1, 1), (top_x, top_y, 2, 1), (top_x, side_z, 2, 2)]   # (x, y, row, col)
+    # trace 0~2: 전체 경로(옅은 빨강) · 3~5: 움직이는 공. 프레임엔 공만 담아 전송량·렌더 비용을 줄인다
+    for x, y, r, c in paths:
+        fig.add_trace(go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgba(197,54,55,0.35)', width=3),
+                                 hoverinfo='skip'), row=r, col=c)
+
+    def ball_size(k):   # ponytail: 실제 원근법이 아니라 진행률에 비례해 커지게 한 근사
+        return 6 + 28 * (k / n) ** 2.5
+
+    def dyn(k):
+        """k번째 지점에 있는 공 3개(측면·상단·주심 시점)."""
+        return [go.Scatter(x=[x[k - 1]], y=[y[k - 1]], mode='markers',
+                           marker=dict(color=ACCENT_HEX, size=ball_size(k) if idx == 2 else 9,
+                                       line=dict(color='white', width=1.5)))
+                for idx, (x, y, _, _) in enumerate(paths)]
+
+    for tr, (_, _, r, c) in zip(dyn(n), paths):   # 처음엔 도착한 모습(= 이전의 정지 화면)
+        fig.add_trace(tr, row=r, col=c)
+    fig.frames = [go.Frame(data=dyn(k), traces=[3, 4, 5], name=str(k)) for k in range(1, n + 1)]
+
+    # 날아가는 시간(초) = 거리 / 전진 속도. 슬로모션은 5배 느리게. 브라우저 한계로 프레임당 최소 16ms.
+    flight_ms = (PITCH_DIST - inp['release_extension']) / max(abs(inp['vy0']), 1) * 1000
+    frame_ms = max(16, flight_ms * (5 if speed == "슬로모션" else 1) / (n - 1))
     fig.update_layout(
-        height=230, margin=dict(l=40, r=10, t=8, b=30),
-        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
+        height=620, margin=dict(l=44, r=10, t=64, b=36), plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='거리 (ft, 측면뷰)', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
-        yaxis=dict(title='높이 (ft)', range=[0, 8], gridcolor=GRID, zeroline=False),
-    )
+        updatemenus=[dict(type='buttons', direction='left', x=0, y=1.13, xanchor='left', yanchor='top',
+                          showactive=False, pad=dict(l=0, t=0), bgcolor='#ffffff', bordercolor='#c2c6cc',
+                          font=dict(size=12, color=INK),
+                          buttons=[dict(label='재생', method='animate',
+                                        args=[None, dict(frame=dict(duration=frame_ms, redraw=True), fromcurrent=False,
+                                                         transition=dict(duration=0), mode='immediate')]),
+                                   dict(label='일시정지', method='animate',
+                                        args=[[None], dict(frame=dict(duration=0, redraw=False), mode='immediate',
+                                                           transition=dict(duration=0))])])])
+    fig.update_xaxes(gridcolor=GRID, zeroline=False)
+    fig.update_yaxes(gridcolor=GRID, zeroline=False)
+    fig.update_xaxes(title_text='거리 (ft)', range=[0, PITCH_DIST], row=1, col=1)
+    fig.update_yaxes(title_text='높이 (ft)', range=[0, 8], row=1, col=1)
+    fig.update_xaxes(title_text='좌우 (ft)', range=[-4, 4], row=2, col=1)
+    fig.update_yaxes(title_text='거리 (ft, 아래가 홈플레이트)', range=[PITCH_DIST + 6, -4], row=2, col=1)
+    fig.update_xaxes(title_text='좌우 (ft)', range=[-2.5, 2.5], row=2, col=2)
+    fig.update_yaxes(title_text='높이 (ft)', range=[0, 7.2], row=2, col=2)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-    # 상단뷰: 위에서 내려다본 시점. y축을 뒤집어(홈플레이트 아래·투수판 위) 로케이션
-    # 차트와 같은 "주심 시점" 좌우 방향이 되게 한다.
-    fig2 = go.Figure()
-    fig2.add_shape(type="rect", x0=0.83, x1=5, y0=PITCH_DIST - 3, y1=PITCH_DIST + 1.5,
-                   fillcolor="rgba(140,143,152,0.08)", line_width=0, layer="below")
-    fig2.add_shape(type="rect", x0=-5, x1=-0.83, y0=PITCH_DIST - 3, y1=PITCH_DIST + 1.5,
-                   fillcolor="rgba(140,143,152,0.08)", line_width=0, layer="below")
-    fig2.add_shape(type="line", x0=-1, x1=1, y0=0, y1=0, line=dict(color=ZONE_LINE, width=5))
-    fig2.add_shape(type="rect", x0=-0.83, x1=0.83, y0=PITCH_DIST - 1.7, y1=PITCH_DIST,
-                   line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
-    fig2.add_annotation(x=0, y=0, yshift=-12, text="투수판", showarrow=False,
-                        font=dict(size=9, color=AXIS_TEXT))
-    fig2.add_annotation(x=0, y=PITCH_DIST + 3, text="타석 (홈플레이트)", showarrow=False,
-                        font=dict(size=9, color=AXIS_TEXT))
-    fig2.add_trace(go.Scatter(x=top_x, y=top_y, mode='lines', line=dict(color=ACCENT_HEX, width=3)))
-    fig2.add_trace(go.Scatter(x=[top_x[0], top_x[-1]], y=[top_y[0], top_y[-1]],
-                              mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
-    fig2.add_vline(x=0, line_dash='dash', line_color=GRID)
-    fig2.update_layout(
-        height=290, margin=dict(l=40, r=10, t=8, b=30),
-        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft, 상단뷰·주심 시점)', range=[-4, 4], gridcolor=GRID,
-                   zeroline=False),
-        yaxis=dict(title='거리 (ft, 아래가 홈플레이트)',
-                   range=[PITCH_DIST + 6, -4], gridcolor=GRID, zeroline=False),
-    )
-    st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
 
 
 def render_model_info():
@@ -1527,7 +1548,11 @@ with left:
     has_sum = bool(nav) and 'pitch_type' in nav["df"].columns
     tab_names = (["대시보드", "궤적 분석"] + (["투구 목록"] if nav else []) + (["경기 요약"] if has_sum else [])
                  + ["모델 정보"])
-    tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    try:   # 선택된 탭을 알 수 있어야(.open) 무거운 궤적 차트를 그 탭이 열렸을 때만 만든다
+        tab_objs = st.tabs(tab_names, on_change="rerun")
+    except TypeError:   # 오래된 Streamlit: 항상 전부 그림
+        tab_objs = st.tabs(tab_names)
+    tabs = dict(zip(tab_names, tab_objs))
     tab_dash, tab_traj, tab_model = tabs["대시보드"], tabs["궤적 분석"], tabs["모델 정보"]
 
     with tab_dash:
@@ -1546,8 +1571,10 @@ with left:
 
     with tab_traj:
         summary_card()
-        with st.container(border=True):
-            render_paths(inp, st.session_state.p_throws)
+        # 프레임 50개짜리 모션 차트는 슬라이더를 움직일 때마다 다시 만들면 반응이 느려지므로 이 탭이 열려 있을 때만
+        if getattr(tab_traj, "open", True):
+            with st.container(border=True):
+                render_paths(inp, st.session_state.p_throws)
 
     if nav:
         with tabs["투구 목록"]:
