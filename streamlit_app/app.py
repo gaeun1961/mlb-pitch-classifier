@@ -1,6 +1,7 @@
 """app.py - MLB Pitch Classifier 웹 데모 (Streamlit) · "Pitch Workbench" 라이트 테마"""
 
 import concurrent.futures
+import html
 import re
 import time
 from datetime import date, timedelta
@@ -20,7 +21,7 @@ st.set_page_config(
     page_title="Pitch Workbench",
     page_icon="⚾",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",   # 모바일에선 접힌 채 시작(펼치면 메인을 덮음)
 )
 
 ACCENT_HEX = "#c53637"      # 빨강 = 지금 예측된 구종
@@ -104,25 +105,39 @@ GLOBAL_IMPORTANCE = [
 # 문자열은 모듈 상수라 재생성 비용은 없다(= 성능 병목 아님).
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap');
 
 :root{
+  --font:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --bg:#ffffff;
   --card:#ffffff;
   --card-border:#e3e5e8;
+  --rule:#eceef0;
   --text:#1c1f24;
-  --text-2:#565b63;
-  --text-3:#7a8089;
-  --label:#6b7078;
+  --text-2:#50565e;
+  --text-3:#62676f;          /* 흰 배경 5.7:1 · 칩 배경 5.2:1 (작은 글씨 AA 4.5:1 이상) */
   --accent:#c53637;
+  --on-accent:#ffffff;
   --chip-gray:#f4f5f6;
+  --field:#f4f5f7;
   --track:#e9eaec;
+  --tip-bg:#3f444b;
+  --radius:8px;
 }
 
-html,body,[class*="css"]{font-family:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
-.stApp{background:#ffffff;color:var(--text);}
-h1,h2,h3,h4{font-family:'Sora',sans-serif !important;color:var(--text);}
+html,body,[class*="css"]{font-family:var(--font);}
+/* 한글은 글자마다 줄바꿈되어 끝 글자만 다음 줄로 넘어가므로 단어 단위로 */
+[data-testid="stMarkdownContainer"] p,[data-testid="stCaptionContainer"] p,[data-testid="stCaptionContainer"],.pw-shap-sub,.pw-shap-expl,.pw-gnote{word-break:keep-all;overflow-wrap:break-word;}
+/* 선택 목록(드롭다운)은 사이드바 폭과 무관하게 내용만큼 넓게 펼친다 */
+/* 가상 스크롤 목록은 줄이 겹쳐 배치돼 max-content가 0으로 계산되므로 고정 최소 폭(가장 긴 항목 ≈ 25rem) */
+[data-testid="stSelectboxVirtualDropdown"]{width:auto !important;min-width:28rem;max-width:92vw;}
+[data-testid="stSelectboxVirtualDropdown"] [role="listbox"]{width:auto !important;min-width:100%;}
+.stApp{background:var(--bg);color:var(--text);}
+h1,h2,h3,h4{font-family:var(--font) !important;color:var(--text);text-wrap:balance;}
 #MainMenu,footer{visibility:hidden;}
 header[data-testid="stHeader"]{height:0 !important;visibility:hidden;}
+/* 헤더는 숨기되 사이드바 펼침 버튼은 살린다 — 없으면 접힌 사이드바(모바일 기본)를 다시 열 수 없다 */
+[data-testid="stExpandSidebarButton"]{visibility:visible;}
 hr{border-color:var(--card-border) !important;}
 
 /* 상단 여백 축소 */
@@ -130,81 +145,81 @@ hr{border-color:var(--card-border) !important;}
 
 /* 사이드바 컴팩트화 */
 section[data-testid="stSidebar"]{background:var(--card);border-right:1px solid var(--card-border);}
-section[data-testid="stSidebar"] .block-container{padding:0.7rem 1rem 1rem;}
+section[data-testid="stSidebar"] .block-container{padding:0.75rem 1rem 1rem;}
 section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:0.5rem;}
-section[data-testid="stSidebar"] hr{margin:0.45rem 0 !important;}
-section[data-testid="stSidebar"] [data-testid="stSlider"]{padding-bottom:0.15rem;}
+section[data-testid="stSidebar"] hr{margin:0.5rem 0 !important;}
 section[data-testid="stSidebar"] [data-testid="stSliderTickBar"]{display:none;}
-section[data-testid="stSidebar"] [data-testid="stWidgetLabel"]{margin-bottom:0.1rem;}
 section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p{font-size:0.82rem;}
-section[data-testid="stSidebar"] .stExpander{margin-top:0.2rem;}
 
 div[data-testid="stVerticalBlockBorderWrapper"]{
   background:var(--card);
   border:1px solid var(--card-border) !important;
-  border-radius:16px !important;
-  box-shadow:0 1px 2px rgba(16,24,40,0.03);
+  border-radius:var(--radius) !important;
 }
-div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:14px 18px;}
+div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:16px 20px;}
 
-.pw-label{font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--label);margin-bottom:10px;}
-.pw-help{position:relative;display:inline-block;cursor:help;font-weight:700;color:var(--text-3);border:1px solid var(--card-border);border-radius:50%;width:14px;height:14px;line-height:13px;text-align:center;font-size:9px;margin-left:4px;text-transform:none;letter-spacing:0;vertical-align:middle;outline:none;}
-.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:135%;left:0;width:280px;max-width:70vw;padding:11px 13px;border-radius:8px;background:#5b6068;color:#ffffff;font-size:13px;font-weight:400;line-height:1.5;text-align:left;text-transform:none;letter-spacing:0;white-space:normal;box-shadow:0 6px 18px rgba(0,0,0,0.2);opacity:0;visibility:hidden;transition:opacity .12s ease;pointer-events:none;}
-.pw-help:hover::after,.pw-help:focus::after{opacity:1;visibility:visible;}
+/* 라벨 = 본문 글꼴 한 단계 작게, 대문자·자간 없음 */
+.pw-label{font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:12px;}
+.pw-help{position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:help;
+  font-weight:700;color:var(--text-3);border:1px solid var(--text-3);border-radius:50%;
+  width:16px;height:16px;font-size:11px;margin-left:6px;vertical-align:middle;}
+.pw-help::before{content:"";position:absolute;inset:-4px;}   /* 클릭·탭 영역 24px */
+.pw-help:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:150%;left:-8px;width:280px;max-width:70vw;
+  padding:12px;border-radius:var(--radius);background:var(--tip-bg);color:var(--on-accent);font-size:13px;font-weight:400;
+  line-height:1.5;text-align:left;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;}
+.pw-help:hover::after,.pw-help:focus-visible::after{opacity:1;visibility:visible;}
 
-.pw-logo{display:flex;align-items:center;gap:9px;margin:0 0 10px;}
-.pw-logo span{font-family:'Sora';font-weight:800;font-size:1.05rem;color:var(--text);}
+div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
 
-/* 결과 요약 스트립 — 4칸 균등, 각 칸 왼쪽 정렬(라벨 위 / 큰 값 아래). 예측 구종만 빨간 테두리 */
-.pw-summary{display:flex;gap:10px;align-items:stretch;margin-bottom:16px;}
-.pw-sum-pred,.pw-sum-chip{flex:1 1 0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;background:#fff;border-radius:12px;padding:8px 14px;}
-.pw-sum-pred{border:1.5px solid var(--accent);}
-.pw-sum-chip{border:1px solid var(--card-border);}
-.pw-sum-k{font-size:0.66rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-3);}
-.pw-sum-v{font-family:'Sora';font-size:1.2rem;font-weight:700;color:var(--text);line-height:1.1;}
-.pw-sum-pred .pw-sum-v{display:inline-flex;align-items:center;gap:6px;}
-.pw-sum-pred i{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;}
+.pw-logo{display:flex;align-items:center;gap:8px;margin:0 0 12px;}
+.pw-logo span{font-weight:700;font-size:1.05rem;color:var(--text);}
+
+/* 결과 요약 — 예측 구종 하나만 크게, 모델 정보는 작은 한 줄 */
+.pw-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;margin:4px 0 16px;
+  padding-bottom:12px;border-bottom:1px solid var(--rule);}
+.pw-sum-pred{font-size:1.9rem;font-weight:700;color:var(--accent);line-height:1.1;}
+.pw-sum-conf{font-size:1.1rem;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.pw-sum-actual{font-size:0.9rem;font-weight:600;color:var(--text-2);}
+.pw-sum-actual.bad{color:var(--accent);}
+/* 투구 이동 줄은 좁은 화면에서도 한 줄 유지 */
+.st-key-pitch_nav [data-testid="stHorizontalBlock"]{flex-wrap:nowrap;align-items:center;}
+.st-key-pitch_nav [data-testid="stColumn"]{min-width:0;}
+.pw-nav{text-align:center;font-size:0.85rem;color:var(--text-2);font-variant-numeric:tabular-nums;}
+.pw-sum-meta{flex-basis:100%;font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;}
+.pw-sum-meta span + span{margin-left:12px;}
 
 /* 구종별 확률 바 — 전부 회색, 예측 구종만 빨강 */
-.pw-bar-row{display:flex;align-items:center;gap:10px;margin:6px 0;}
-.pw-bar-name{width:82px;font-size:0.82rem;color:var(--text-2);flex:none;}
-.pw-bar-track{flex:1;height:8px;background:var(--track);border-radius:999px;overflow:hidden;}
-.pw-bar-fill{display:block;height:100%;border-radius:999px;}
-.pw-bar-pct{width:40px;text-align:right;font-size:0.8rem;font-weight:600;color:var(--text);flex:none;}
+.pw-bars{padding-bottom:12px;display:grid;grid-template-columns:1fr 1fr;column-gap:24px;}
+@media (max-width:640px){.pw-bars{grid-template-columns:1fr;}}
+.pw-bar-row{display:flex;align-items:center;gap:12px;margin:6px 0;}
+.pw-bar-name{width:84px;font-size:0.82rem;color:var(--text-2);flex:none;}
+.pw-bar-track{flex:1;height:8px;background:var(--track);border-radius:2px;overflow:hidden;}
+.pw-bar-fill{display:block;height:100%;border-radius:2px;}
+.pw-bar-pct{width:40px;text-align:right;font-size:0.8rem;font-weight:600;color:var(--text);flex:none;font-variant-numeric:tabular-nums;}
 
-.pw-shap-head{display:flex;align-items:center;gap:8px;font-family:'Sora';font-weight:700;font-size:1rem;color:var(--text);}
-.pw-shap-sub{font-size:0.78rem;color:var(--text-3);margin:2px 0 12px;}
-.pw-shap-expl{font-size:0.82rem;line-height:1.6;color:var(--text-2);background:var(--chip-gray);padding:10px 12px;border-radius:10px;margin:0 0 14px;}
-.pw-wf-ends{display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-3);margin:-6px 2px 14px;}
-.pw-fcard{border:1px solid var(--card-border);border-radius:12px;padding:11px 13px;margin-bottom:9px;}
-.pw-fcard-top{display:flex;justify-content:space-between;align-items:center;}
+.pw-shap-head{font-weight:700;font-size:1rem;color:var(--text);}
+.pw-shap-sub{font-size:0.8rem;color:var(--text-3);margin:4px 0 12px;}
+.pw-shap-expl{font-size:0.85rem;line-height:1.6;color:var(--text-2);margin:0 0 16px;padding-left:12px;border-left:2px solid var(--accent);}
+.pw-wf-ends{display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin:-8px 0 16px;font-variant-numeric:tabular-nums;}
+
+/* 특성 기여도 — 카드 대신 구분선 목록 */
+.pw-frow{padding:10px 0;border-top:1px solid var(--rule);}
+.pw-frow-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
 .pw-fname{font-size:0.85rem;font-weight:600;color:var(--text);}
-.pw-fbadge{font-size:0.75rem;font-weight:700;padding:2px 8px;border-radius:999px;background:#fff;border:1px solid var(--card-border);color:var(--text-2);}
-.pw-fbadge.pos{color:var(--accent);border-color:var(--accent);}
-.pw-fmag{height:3px;background:var(--track);border-radius:999px;margin:9px 0 8px;overflow:hidden;}
-.pw-fmag span{display:block;height:100%;border-radius:999px;}
-.pw-fdesc{font-size:0.78rem;line-height:1.55;color:var(--text-3);margin:0;}
+.pw-fval{font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;margin-left:8px;font-weight:400;}
+.pw-fbadge{font-size:0.8rem;font-weight:700;color:var(--text-2);font-variant-numeric:tabular-nums;}
+.pw-fbadge.pos{color:var(--accent);}
+.pw-fmag{height:4px;background:var(--track);border-radius:2px;margin-top:8px;overflow:hidden;}
+.pw-fmag span{display:block;height:100%;}
 
-.pw-guide{width:100%;table-layout:fixed;border-collapse:collapse;font-size:0.76rem;color:var(--text-2);}
-.pw-guide th{font-size:0.6rem;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-3);text-align:left;padding:0 3px 5px;border-bottom:1px solid var(--card-border);}
-.pw-guide td{padding:6px 3px;border-bottom:1px solid #f1f2f4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.pw-guide td:first-child{color:var(--text);font-weight:500;white-space:normal;}
+.pw-guide{width:100%;table-layout:fixed;border-collapse:collapse;font-size:0.8rem;color:var(--text-2);font-variant-numeric:tabular-nums;}
+.pw-guide th{font-size:12px;font-weight:600;color:var(--text-3);text-align:left;padding:0 4px 4px;border-bottom:1px solid var(--card-border);}
+.pw-guide td{padding:6px 4px;border-bottom:1px solid var(--rule);overflow-wrap:anywhere;}
+.pw-guide td:first-child{color:var(--text);font-weight:500;}
 .pw-guide tbody tr:last-child td{border-bottom:none;}
-.pw-gcode{display:inline-block;font-family:'Sora';font-weight:700;font-size:0.64rem;background:var(--chip-gray);color:var(--text-2);padding:2px 5px;border-radius:5px;margin-right:6px;}
-.pw-gnote{font-size:9px;color:var(--text-3);margin-top:8px;line-height:1.4;}
-
-div[data-baseweb="tab-list"]{gap:6px;border-bottom:none !important;}
-button[data-baseweb="tab"]{background:var(--chip-gray);border-radius:999px;padding:5px 15px !important;font-family:'Sora';font-weight:600;color:var(--text-2);min-height:0;}
-button[data-baseweb="tab"][aria-selected="true"]{background:var(--text);color:#fff;}
-button[data-baseweb="tab"][aria-selected="true"] p{color:#fff !important;}
-div[data-baseweb="tab-highlight"],div[data-baseweb="tab-border"]{display:none !important;}
-button[data-baseweb="tab"] p{font-size:0.8rem !important;font-weight:600 !important;}
-
-div[role="radiogroup"]{gap:6px;flex-wrap:wrap;}
-div[role="radiogroup"] > label{background:var(--chip-gray);border:1px solid var(--card-border);border-radius:999px;padding:4px 12px;margin:0;}
-div[role="radiogroup"] > label:has(input:checked){background:var(--text);border-color:var(--text);}
-div[role="radiogroup"] > label:has(input:checked) div{color:#fff;}
-div[role="radiogroup"] > label > div:first-child{display:none;}
+.pw-gcode{display:inline-block;font-weight:700;font-size:0.7rem;background:var(--chip-gray);color:var(--text-2);padding:2px 4px;border-radius:4px;margin-right:8px;}
+.pw-gnote{font-size:12px;color:var(--text-3);margin-top:8px;line-height:1.5;}
 
 /* 입력창 — 테두리는 config.toml showWidgetBorder가 그려주고, 여기선 연한 회색
    채움을 더해 흰 배경에서도 필드 경계가 확실히 보이게 한다 */
@@ -212,8 +227,8 @@ div[role="radiogroup"] > label > div:first-child{display:none;}
 .stTextInput div[data-baseweb="base-input"],
 .stDateInput div[data-baseweb="input"],
 .stNumberInput div[data-baseweb="input"],
-.stSelectbox div[data-baseweb="select"] > div{background:#f4f5f7 !important;}
-.stTextInput input,.stDateInput input,.stNumberInput input{background:#f4f5f7 !important;}
+.stSelectbox div[data-baseweb="select"] > div{background:var(--field) !important;}
+.stTextInput input,.stDateInput input,.stNumberInput input{background:var(--field) !important;}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -371,8 +386,8 @@ def run_prediction(inp):
     설명은 준비되는 대로 자동으로 표시된다.
     """
     spinner_msg = (
-        "예측 중입니다..." if st.session_state.warmed_up
-        else "예측 중입니다... (첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요)"
+        "예측 중입니다…" if st.session_state.warmed_up
+        else "예측 중입니다… (첫 예측은 모델 로딩으로 잠시 걸릴 수 있어요)"
     )
     try:
         with st.spinner(spinner_msg):
@@ -427,22 +442,99 @@ def prepare_pitches(df):
     return df_valid
 
 
+EXTRA_PITCH_NAMES = {'ST': '스위퍼', 'KC': '너클커브', 'SV': '슬러브', 'FO': '포크볼',
+                     'KN': '너클볼', 'EP': '이퓨스', 'CS': '슬로 커브'}
+RESULT_KR = {'ball': '볼', 'blocked_ball': '볼', 'called_strike': '스트라이크', 'swinging_strike': '헛스윙',
+             'swinging_strike_blocked': '헛스윙', 'foul': '파울', 'foul_tip': '파울팁', 'foul_bunt': '파울',
+             'hit_into_play': '인플레이', 'hit_by_pitch': '몸에 맞는 공', 'automatic_ball': '볼',
+             'automatic_strike': '스트라이크', 'missed_bunt': '헛스윙', 'pitchout': '피치아웃'}
+
+
+def pitch_name(code):
+    return PITCH_NAMES.get(code) or EXTRA_PITCH_NAMES.get(code) or str(code)
+
+
+def pitch_table(df):
+    """투구 목록 표. 경기 데이터(이닝·타석 등)가 있으면 그 열, 없으면(CSV 등) 있는 열만."""
+    c, t = df.columns, {}
+
+    def num(col):
+        return pd.to_numeric(df[col], errors='coerce').astype('Int64')
+
+    game = 'inning' in c
+    if game:
+        half = df['inning_topbot'].map({'Top': '초', 'Bot': '말'}).fillna('') if 'inning_topbot' in c else ''
+        t['이닝'] = num('inning').astype(str) + '회' + half
+    if 'at_bat_number' in c:
+        t['타석'] = num('at_bat_number')
+    if 'pitch_number' in c:
+        t['구'] = num('pitch_number')
+    if 'balls' in c and 'strikes' in c:
+        t['카운트'] = num('balls').astype(str) + '-' + num('strikes').astype(str)
+    if 'stand' in c:
+        t['타자'] = df['stand'].map({'L': '좌', 'R': '우'}).fillna('')
+    if not game and 'player_name' in c:
+        t['투수'] = df['player_name']
+    if not game and 'game_date' in c:
+        t['날짜'] = df['game_date'].astype(str).str[:10]
+    if 'pitch_type' in c:
+        t['실제 구종'] = df['pitch_type'].map(lambda x: pitch_name(x) if pd.notna(x) else '')
+    t['구속'] = df['release_speed'].round(1)
+    if not game and 'release_spin_rate' in c:
+        t['회전수'] = df['release_spin_rate'].round(0).astype('Int64')
+    if 'description' in c:
+        t['결과'] = df['description'].map(lambda x: RESULT_KR.get(x, x) if pd.notna(x) else '')
+    return pd.DataFrame(t)
+
+
+def _step_pitch(d, n, tkey):
+    """이전·다음 버튼: 표의 선택 행을 옮긴다(콜백이라 이번 실행의 위젯 생성 전에 반영됨)."""
+    s = st.session_state.get(tkey)
+    cur = s["selection"]["rows"][0] if s and s["selection"]["rows"] else 0
+    st.session_state[tkey] = {"selection": {"rows": [min(max(cur + d, 0), n - 1)], "columns": []}}
+
+
+def _pitch_info(row):
+    """'5회초, 우타자, 카운트 2-1' — 있는 정보만."""
+    out = []
+    if pd.notna(row.get('inning')):
+        out.append(f"{int(row['inning'])}회{'초' if row.get('inning_topbot') == 'Top' else '말'}")
+    if row.get('stand') in ('L', 'R'):
+        out.append('좌타자' if row['stand'] == 'L' else '우타자')
+    if pd.notna(row.get('balls')) and pd.notna(row.get('strikes')):
+        out.append(f"카운트 {int(row['balls'])}-{int(row['strikes'])}")
+    return ", ".join(out)
+
+
 def select_and_predict(df_valid, key=None):
-    """prepare_pitches를 거친 DataFrame에서 투구를 고르게 하고, 선택된 투구로 예측을 실행한다.
-    key를 바꾸면(예: 경기별) 새 위젯이 되어 선택이 첫 투구로 초기화된다."""
-    show_cols = [c for c in ['player_name', 'p_throws', 'release_speed',
-                              'release_spin_rate', 'game_date'] if c in df_valid.columns]
-    idx = st.selectbox(
-        "투구 선택",
-        options=df_valid.index,
-        format_func=lambda i: " | ".join(str(df_valid.loc[i, c]) for c in show_cols),
-        key=key,
-    )
-    row = df_valid.loc[idx]
+    """prepare_pitches를 거친 DataFrame에서 현재 투구를 정하고 예측을 실행한다.
+    현재 투구 = '투구 목록' 표의 선택 행(표 클릭·이전/다음 버튼 모두 이 한 곳을 바꾼다).
+    key를 바꾸면(예: 경기별) 선택이 첫 투구로 초기화된다."""
+    if {'at_bat_number', 'pitch_number'} <= set(df_valid.columns):
+        df_valid = df_valid.sort_values(['at_bat_number', 'pitch_number']).reset_index(drop=True)
+    n = len(df_valid)
+    sig = key or f"df{n}"
+    tkey = f"pitch_tbl_{sig}"
+    state = st.session_state.get(tkey)
+    rows = state["selection"]["rows"] if state else []
+    if st.session_state.get("_pitch_sig") != sig:
+        idx = 0
+    else:   # 선택 해제(같은 행 재클릭)는 직전 선택 유지
+        idx = rows[0] if rows else st.session_state.get("_pitch_idx", 0)
+    idx = min(max(idx, 0), n - 1)
+    st.session_state["_pitch_sig"], st.session_state["_pitch_idx"] = sig, idx
+    st.session_state[tkey] = {"selection": {"rows": [idx], "columns": []}}
+
+    row = df_valid.iloc[idx]
+    st.session_state["_pitch_nav"] = dict(n=n, idx=idx, tkey=tkey, table=pitch_table(df_valid),
+                                          info=_pitch_info(row))
+    pt = row.get('pitch_type')
+    st.session_state["actual_pitch"] = pt if isinstance(pt, str) else None
     inp = {col: float(row[col]) for col in FEATURE_COLS}
     st.session_state.inp = inp
     if 'p_throws' in df_valid.columns:
         st.session_state.p_throws = str(row.get('p_throws', 'R'))
+    st.caption(f"현재 투구 {idx + 1} / {n}. 메인 화면 위의 이전·다음 버튼이나 '투구 목록' 탭에서 바꿉니다.")
     run_prediction(inp)
 
 
@@ -512,9 +604,32 @@ def career_label(c):
     return f"{c['name']} ({c['debut_year']}~{end}, 은퇴)"
 
 
-def pitcher_date_bounds(c):
-    """이 투수의 Statcast 조회 가능 날짜 범위(최소·최대)와 기본 조회 범위(최근 시즌)를 반환한다.
+@st.cache_data(show_spinner=False, ttl=3600)
+def last_game_date(player_id, from_year, to_year):
+    """MLB 경기 기록(정규시즌)에서 이 투수가 마지막으로 등판한 날. from_year부터 to_year까지
+    거꾸로 훑어 처음 등판 기록이 나오는 시즌의 마지막 날을 돌려준다(없거나 조회 실패면 None).
 
+    검색 API의 lastPlayedDate는 현역 선수에겐 비어 있어서 못 쓴다.
+    ponytail: 정규시즌만 — 포스트시즌 등판이 더 뒤여도 기본 종료일은 정규시즌 마지막 날(직접 늘릴 수 있음).
+    """
+    for year in range(from_year, to_year - 1, -1):
+        try:
+            r = requests.get(
+                f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats",
+                params={"stats": "gameLog", "group": "pitching", "season": year}, timeout=10)
+            r.raise_for_status()
+            splits = (r.json().get("stats") or [{}])[0].get("splits", [])
+        except requests.exceptions.RequestException:
+            return None
+        if splits:
+            return max(sp["date"] for sp in splits)
+    return None
+
+
+def pitcher_date_bounds(c):
+    """이 투수의 Statcast 조회 가능 날짜 범위(최소·최대)와 기본 조회 범위를 반환한다.
+
+    기본 범위 = 마지막으로 등판한 시즌 처음~마지막 등판일(등판 기록을 못 구하면 최근 시즌 전체).
     Statcast 시작일(2015-01-01) 이전에 은퇴한 선수는 None을 반환한다.
     """
     debut = date.fromisoformat(c["debut_date"])
@@ -530,8 +645,12 @@ def pitcher_date_bounds(c):
     if min_d > max_d:
         return None
 
-    def_start = max(date(max_d.year, 1, 1), min_d)
-    return min_d, max_d, def_start, max_d
+    def_end = max_d
+    last = last_game_date(c["id"], max_d.year, min_d.year)
+    if last:
+        def_end = min(max(date.fromisoformat(last), min_d), max_d)
+    def_start = max(date(def_end.year, 1, 1), min_d)
+    return min_d, max_d, def_start, def_end
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -562,6 +681,12 @@ LOGO_HTML = """
   <span>Pitch Workbench</span>
 </div>
 """
+
+
+def help_icon(tip):
+    """라벨 옆 도움말 ? — 키보드 포커스·화면 낭독기(aria-label)로도 읽히게."""
+    t = html.escape(tip, quote=True)
+    return f'<span class="pw-help" tabindex="0" role="img" aria-label="도움말: {t}" data-tip="{t}">?</span>'
 
 
 def _flip_ax(hint):
@@ -596,17 +721,19 @@ def render_guide(p_throws):
     )
 
 
-def render_summary(label, conf, inf_ms):
+def render_summary(label, conf, inf_ms, actual=None):
+    actual_html = ''
+    if actual:
+        verdict = ("일치" if actual == label else "불일치") if actual in PITCH_NAMES else "모델 7구종 밖"
+        actual_html = (f'<span class="pw-sum-actual {"bad" if actual in PITCH_NAMES and actual != label else ""}">'
+                       f'실제 구종 {pitch_name(actual)} ({verdict})</span>')
     st.markdown(
         '<div class="pw-summary">'
-        '<span class="pw-sum-pred"><span class="pw-sum-k">예측 구종</span>'
-        f'<span class="pw-sum-v"><i></i>{PITCH_NAMES.get(label, label)}</span></span>'
-        f'<span class="pw-sum-chip"><span class="pw-sum-k">신뢰도</span>'
-        f'<span class="pw-sum-v">{conf * 100:.0f}%</span></span>'
-        '<span class="pw-sum-chip"><span class="pw-sum-k">정확도 (처음 보는 투수 기준)</span>'
-        '<span class="pw-sum-v">86.0%</span></span>'
-        f'<span class="pw-sum-chip"><span class="pw-sum-k">추론 시간</span>'
-        f'<span class="pw-sum-v">{inf_ms:.0f}ms</span></span>'
+        f'<span class="pw-sum-pred">{PITCH_NAMES.get(label, label)}</span>'
+        f'<span class="pw-sum-conf">신뢰도 {conf * 100:.0f}%</span>'
+        f'{actual_html}'
+        '<span class="pw-sum-meta"><span>모델 정확도 86.0% (처음 보는 투수 기준)</span>'
+        f'<span>추론 {inf_ms:.0f}ms</span></span>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -629,7 +756,7 @@ def render_prob_dist(proba, label):
             f'<span class="pw-bar-pct">{v:.0f}%</span>'
             '</div>'
         )
-    st.markdown(rows, unsafe_allow_html=True)
+    st.markdown(f'<div class="pw-bars">{rows}</div>', unsafe_allow_html=True)
 
 
 def render_movement(inp):
@@ -639,12 +766,7 @@ def render_movement(inp):
     - 실제 투구 모드: 회색 점(투구 분포)과 빨간 링 모두 Statcast 실측 pfx_x·pfx_z(×12).
     - 가상 입력 모드: 빨간 링·회색 점(세션 이력)은 _pfx_inches 계산값.
     구종별 회색 원도 _pfx_inches 계산값이며, 계산식이 실측 pfx와 같은 좌표계라 모두 겹쳐 비교할 수 있다."""
-    st.markdown(
-        '<div class="pw-label">무브먼트 차트 (유도 무브먼트, in) '
-        '<span class="pw-help" tabindex="0" data-tip="회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 '
-        '이 차트에 없는 회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 '
-        '떨어져 보일 수 있습니다.">❓</span></div>',
-        unsafe_allow_html=True)
+    label_slot = st.empty()   # 도움말에 아래에서 정해지는 범례(ctx)를 넣으려고 자리만 먼저 잡는다
     bg = st.session_state.get('movement_bg')
     hist = st.session_state.history
     label = st.session_state.label
@@ -660,10 +782,10 @@ def render_movement(inp):
         cx, cy = _pfx_inches(*ref)
         hot = code == label
         # add_shape는 호버를 못 받으므로, 마우스오버 시 구종명이 뜨도록 큰 마커의
-        # scatter로 그린다(반경 4.5인치 ≈ 이 차트 스케일에서 지름 50px 근사).
+        # scatter로 그린다(반경 4.5인치 ≈ 이 차트 스케일에서 지름 40px 근사).
         fig.add_trace(go.Scatter(
             x=[cx], y=[cy], mode='markers', showlegend=False,
-            marker=dict(size=50, color="rgba(140,143,152,0.10)",
+            marker=dict(size=40, color="rgba(140,143,152,0.10)",
                         line=dict(color=ACCENT_HEX if hot else "rgba(140,143,152,0.45)",
                                   width=2 if hot else 1)),
             hovertemplate=f"{PITCH_NAMES.get(code, code)}<extra></extra>",
@@ -694,16 +816,22 @@ def render_movement(inp):
     fig.add_trace(go.Scatter(x=[px], y=[py], mode='markers',
                              marker=dict(size=7, color=ACCENT_HEX)))
     fig.update_layout(
-        height=380, margin=dict(l=44, r=20, t=10, b=38),
+        height=300, margin=dict(l=44, r=8, t=8, b=38),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='수평 무브먼트 (in)', range=[-30, 30], gridcolor=GRID,
+        xaxis=dict(title='수평 (in)', range=[-30, 30], gridcolor=GRID,
                    zeroline=False, scaleanchor='y'),
-        yaxis=dict(title='수직 무브먼트 (in) · 위 라이징 / 아래 드롭', range=[-30, 30],
+        yaxis=dict(title='수직 (in, 위가 라이징)', range=[-30, 30],
                    gridcolor=GRID, zeroline=False),
     )
+    label_slot.markdown(
+        '<div class="pw-label">무브먼트 (유도 무브먼트, in) '
+        + help_icon(f"점선 원 = 12·24인치, 회색 원 = 구종별 대략 위치(예측 구종은 빨강). {ctx}. "
+                    "회색 원은 2026시즌 실측 평균의 대략적인 경향일 뿐, 실제 예측은 이 차트에 없는 "
+                    "회전축 등 15개 피처까지 합쳐 계산합니다 — 그래서 예측 구종이 자기 회색 원과 "
+                    "떨어져 보일 수 있습니다.") + '</div>',
+        unsafe_allow_html=True)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    st.caption(f"점선 원 = 12·24인치 · 회색 원 = 구종별 대략 위치(예측 구종 빨강) · {ctx}")
 
 
 def render_strikezone(inp, clickable=False):
@@ -712,12 +840,13 @@ def render_strikezone(inp, clickable=False):
     tip = (
         "좌우(ax)·수직(az) 무브먼트 슬라이더가 클릭한 위치에 실제로 도달하도록 역산되어 "
         "바뀝니다 — 구종이 무엇이 되는지는 신경 쓰지 않고, 그 위치에 맞는 움직임 값을 그대로 "
-        "반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다."
+        "반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다. "
+        "구속·회전수·익스텐션은 그대로 유지됩니다. 회색 점 = 릴리스, 빨간 점 = 플레이트 통과 위치."
         if clickable else
         "주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치"
     )
     st.markdown(
-        f'<div class="pw-label">로케이션 · 스트라이크존 <span class="pw-help" tabindex="0" data-tip="{tip}">❓</span></div>',
+        f'<div class="pw-label">스트라이크존{" (클릭해서 위치 지정)" if clickable else ""} {help_icon(tip)}</div>',
         unsafe_allow_html=True)
     fig = go.Figure()
     # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
@@ -725,11 +854,11 @@ def render_strikezone(inp, clickable=False):
                   line=dict(color=ZONE_LINE, width=2),
                   fillcolor="rgba(138,143,152,0.06)", layer="below")
     if clickable:
-        # 옅은 격자 = 클릭 히트타깃(≈0.15ft 간격). 클릭하면 가장 가까운 점이 선택된다.
+        # 옅은 격자 = 클릭 히트타깃(≈0.15ft 간격 ≈ 이 차트 크기에서 5px). 클릭하면 가장 가까운 점이 선택된다.
         # 완전 투명 + hoverinfo='skip'이면 Plotly가 클릭 이벤트를 안 잡으므로 옅게라도 그린다.
         gx, gy = np.meshgrid(np.arange(-1.8, 1.81, 0.15), np.arange(0.3, 4.81, 0.15))
         fig.add_trace(go.Scatter(x=gx.ravel(), y=gy.ravel(), mode='markers',
-                                 name='click', marker=dict(size=16, color='rgba(140,143,152,0.16)'),
+                                 name='click', marker=dict(size=6, color='rgba(140,143,152,0.10)'),
                                  hoverinfo='none'))
     # 릴리스 지점(회색). plate_x/release_pos_x는 Statcast와 같은 포수·주심 시점 좌표
     fig.add_trace(go.Scatter(
@@ -745,24 +874,26 @@ def render_strikezone(inp, clickable=False):
         hoverinfo='skip',
     ))
     fig.update_layout(
-        height=400, margin=dict(l=40, r=10, t=10, b=32),
+        height=300, margin=dict(l=40, r=8, t=8, b=32),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft) · 주심 시점', range=[-2.5, 2.5], gridcolor=GRID,
+        xaxis=dict(title='좌우 (ft, 주심 시점)', range=[-2.5, 2.5], gridcolor=GRID, constrain='domain',
                    zeroline=False, scaleanchor='y'),
         yaxis=dict(title='높이 (ft)', range=[0, 7.5], gridcolor=GRID, zeroline=False),
     )
     if clickable:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False},
                         on_select="rerun", selection_mode="points", key="zone_click")
-        st.caption("존 안을 클릭하면 그 위치로 공이 이동합니다 · 구속·회전수·익스텐션은 유지")
     else:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
 def render_paths(inp, p_throws):
     """측면뷰·상단뷰 궤적. 홈플레이트에 스트라이크존 박스로 존 대비 위치를 표시한다."""
-    st.markdown('<div class="pw-label">투구 궤적</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pw-label">투구 궤적 '
+                + help_icon("위 = 측면뷰, 아래 = 위에서 내려다본 상단뷰(주심 시점). 회색 사각형 = 홈플레이트 "
+                            "스트라이크존, 빨간 점 = 릴리스·플레이트 통과 지점.") + '</div>',
+                unsafe_allow_html=True)
     side_x, side_z = compute_trajectory_side(inp)
     top_y, top_x = compute_trajectory_top(inp, p_throws)
 
@@ -783,17 +914,17 @@ def render_paths(inp, p_throws):
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=0.6, line=dict(color=ZONE_LINE, width=5))
     fig.add_annotation(x=0, y=0.6, yshift=9, text="투수판", showarrow=False,
                        font=dict(size=9, color=AXIS_TEXT))
-    fig.add_annotation(x=PITCH_DIST, y=3.5, yshift=10, text="홈플레이트", showarrow=False,
+    fig.add_annotation(x=PITCH_DIST, y=3.5, yshift=10, xanchor='right', text="홈플레이트", showarrow=False,
                        font=dict(size=9, color=AXIS_TEXT))
     fig.add_trace(go.Scatter(x=side_x, y=side_z, mode='lines',
                              line=dict(color=ACCENT_HEX, width=3)))
     fig.add_trace(go.Scatter(x=[side_x[0], side_x[-1]], y=[side_z[0], side_z[-1]],
                              mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
     fig.update_layout(
-        height=300, margin=dict(l=40, r=10, t=10, b=30),
+        height=230, margin=dict(l=40, r=10, t=8, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='거리 (ft) · 측면뷰', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
+        xaxis=dict(title='거리 (ft, 측면뷰)', range=[0, PITCH_DIST], gridcolor=GRID, zeroline=False),
         yaxis=dict(title='높이 (ft)', range=[0, 8], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
@@ -810,23 +941,22 @@ def render_paths(inp, p_throws):
                    line=dict(color=ZONE_LINE, width=1.8), fillcolor="rgba(0,0,0,0)", layer="below")
     fig2.add_annotation(x=0, y=0, yshift=-12, text="투수판", showarrow=False,
                         font=dict(size=9, color=AXIS_TEXT))
-    fig2.add_annotation(x=0, y=PITCH_DIST + 3, text="타석 · 홈플레이트", showarrow=False,
+    fig2.add_annotation(x=0, y=PITCH_DIST + 3, text="타석 (홈플레이트)", showarrow=False,
                         font=dict(size=9, color=AXIS_TEXT))
     fig2.add_trace(go.Scatter(x=top_x, y=top_y, mode='lines', line=dict(color=ACCENT_HEX, width=3)))
     fig2.add_trace(go.Scatter(x=[top_x[0], top_x[-1]], y=[top_y[0], top_y[-1]],
                               mode='markers', marker=dict(color=ACCENT_HEX, size=8)))
     fig2.add_vline(x=0, line_dash='dash', line_color=GRID)
     fig2.update_layout(
-        height=440, margin=dict(l=40, r=10, t=10, b=30),
+        height=290, margin=dict(l=40, r=10, t=8, b=30),
         plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft) · 상단뷰 (주심 시점)', range=[-4, 4], gridcolor=GRID,
+        xaxis=dict(title='좌우 (ft, 상단뷰·주심 시점)', range=[-4, 4], gridcolor=GRID,
                    zeroline=False),
-        yaxis=dict(title='거리 (ft) · 아래 홈플레이트 → 위 투수판',
+        yaxis=dict(title='거리 (ft, 아래가 홈플레이트)',
                    range=[PITCH_DIST + 6, -4], gridcolor=GRID, zeroline=False),
     )
     st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
-    st.caption("회색 사각형 = 홈플레이트 스트라이크존 · 빨간 점 = 릴리스·플레이트 통과 지점")
 
 
 def render_model_info():
@@ -844,10 +974,11 @@ def render_model_info():
 
     st.divider()
     st.markdown(
-        '<div class="pw-label">구종별 정밀도 · 재현율 · F1 '
-        '<span class="pw-help" tabindex="0" data-tip="이전 모델(2024~2025 학습)을 당시 학습 때 보지 못한 2026시즌 '
-        '데이터(549,360건)에 평가한 값입니다. 현재 모델은 2026시즌까지 학습에 포함해 아직 재평가 전입니다. 위 요약 지표(투수 단위 5-fold, 처음 보는 투수 기준)와는 '
-        '평가 방식이 달라 서로 직접 비교하지 마세요.">❓</span></div>',
+        '<div class="pw-label">구종별 정밀도, 재현율, F1 '
+        + help_icon("이전 모델(2024~2025 학습)을 당시 학습 때 보지 못한 2026시즌 "
+                    "데이터(549,360건)에 평가한 값입니다. 현재 모델은 2026시즌까지 학습에 포함해 아직 재평가 전입니다. "
+                    "위 요약 지표(투수 단위 5-fold, 처음 보는 투수 기준)와는 "
+                    "평가 방식이 달라 서로 직접 비교하지 마세요.") + '</div>',
         unsafe_allow_html=True)
     rows = "".join(
         f'<tr><td><span class="pw-gcode">{code}</span>{PITCH_NAMES.get(code, code)}</td>'
@@ -867,9 +998,8 @@ def render_model_info():
     st.divider()
     st.markdown(
         '<div class="pw-label">전역 특성 중요도 '
-        '<span class="pw-help" tabindex="0" data-tip="오른쪽 SHAP 인사이트는 이번 한 번의 예측에 대한 기여도이고, '
-        '이 차트는 2026시즌 평가셋 전체에서 평균 낸 모델 전반의 평균적인 중요도 순위입니다.">'
-        '❓</span></div>',
+        + help_icon("오른쪽 예측 근거(SHAP)는 이번 한 번의 예측에 대한 기여도이고, "
+                    "이 차트는 2026시즌 평가셋 전체에서 평균 낸 모델 전반의 평균적인 중요도 순위입니다.") + '</div>',
         unsafe_allow_html=True)
     names = [FEAT_KR.get(f, f) for f, _ in reversed(GLOBAL_IMPORTANCE)]
     vals = [v for _, v in reversed(GLOBAL_IMPORTANCE)]
@@ -963,28 +1093,26 @@ def render_waterfall(base, ordered):
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
+def _fmt(v):
+    return f"{v:.0f}" if abs(v) >= 100 else f"{v:.1f}"
+
+
 def render_feature_card(f, c, mx, label):
+    """특성 하나의 기여도 행: 이름 · 현재값(보통값) · 막대 · 기여도."""
     name = FEAT_KR.get(f, f)
     pos = c >= 0
     width = abs(c) / mx * 100 if mx else 0
     ref = SAMPLE_VALUES.get(f)
     cur = st.session_state.inp.get(f)
-    if ref is not None and cur is not None and abs(cur - ref) > 1e-6:
-        level = "높아" if cur > ref else "낮아"
-    else:
-        level = "작용해"
-    direction = "끌어올렸" if pos else "끌어내렸"
-    pitch = PITCH_NAMES.get(label, label)
-    sent = f"{name}이(가) 일반적인 수준보다 {level} {pitch} 예측 확률을 {direction}습니다 (기여도 {c:+.2f})."
+    val = f'{_fmt(cur)} (보통 {_fmt(ref)})' if ref is not None and cur is not None else ''
     st.markdown(
-        '<div class="pw-fcard">'
-        '<div class="pw-fcard-top">'
-        f'<span class="pw-fname">{name}</span>'
+        '<div class="pw-frow">'
+        '<div class="pw-frow-top">'
+        f'<span class="pw-fname">{name}<span class="pw-fval">{val}</span></span>'
         f'<span class="pw-fbadge {"pos" if pos else "neg"}">{c:+.2f}</span>'
         '</div>'
         f'<div class="pw-fmag"><span style="width:{width:.0f}%;'
         f'background:{ACCENT_HEX if pos else GRAY}"></span></div>'
-        f'<p class="pw-fdesc">{sent}</p>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -1006,19 +1134,17 @@ def _explanation_body():
 
     explanation = st.session_state.explanation
     if explanation:
-        st.markdown(f'<p class="pw-shap-expl">{explanation}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="pw-shap-expl">{html.escape(explanation)}</p>', unsafe_allow_html=True)
     elif st.session_state.get('_explain_future') is not None:
-        st.caption("💭 설명 생성 중...")
+        st.caption("설명 생성 중…")
+    else:
+        st.caption("설명을 불러오지 못했습니다. 아래 기여도 목록으로 확인해 주세요.")
 
 
 def render_shap_panel(attribution, conf, label):
     st.markdown(
-        '<div class="pw-shap-head">'
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c53637" '
-        'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
-        '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>'
-        'SHAP 인사이트</div>'
-        '<div class="pw-shap-sub">예측에 영향을 준 특성 기여도</div>',
+        '<div class="pw-shap-head">예측 근거 (SHAP)</div>'
+        '<div class="pw-shap-sub">각 특성이 예측 확률을 올리고 내린 정도</div>',
         unsafe_allow_html=True,
     )
     if not attribution or not conf or not label:
@@ -1027,7 +1153,8 @@ def render_shap_panel(attribution, conf, label):
 
     pending = st.session_state.get('_explain_future') is not None
     st.session_state['_explain_polling'] = pending
-    st.fragment(_explanation_body, run_every=1 if pending else None)()
+    with st.expander("AI 설명 보기"):
+        st.fragment(_explanation_body, run_every=1 if pending else None)()
 
     base, contribs = _waterfall_contribs(attribution, conf)
     ordered = sorted(contribs.items(), key=lambda kv: abs(kv[1]), reverse=True)
@@ -1050,6 +1177,10 @@ def render_shap_panel(attribution, conf, label):
             continue
         render_feature_card(f, c, mx, label)
 
+
+# 투구 탐색 상태는 매 실행마다 사이드바(select_and_predict)가 다시 채운다 — 직접 조작 모드에선 비어 있음
+st.session_state["_pitch_nav"] = None
+st.session_state["actual_pitch"] = None
 
 # ── 사이드바: 입력 컨트롤 ────────────────────────────────
 with st.sidebar:
@@ -1111,32 +1242,32 @@ with st.sidebar:
 
     if _manual:
         spd = st.slider("구속 (mph)", 60.0, 105.0, float(st.session_state.inp['release_speed']),
-                        0.5, help="공이 손을 떠나는 순간의 속도 · 빠를수록 FF/FC 계열, "
+                        0.5, format="%.1f", help="공이 손을 떠나는 순간의 속도 · 빠를수록 FF/FC 계열, "
                                   "느릴수록 커브 등 변화구 계열로 기울어짐")
         spin = st.slider("스핀레이트 (rpm)", 1000.0, 3500.0,
-                         float(st.session_state.inp['release_spin_rate']), 10.0,
+                         float(st.session_state.inp['release_spin_rate']), 10.0, format="%.0f",
                          help="공의 분당 회전수 · 높을수록 포심/커터 계열로 기울어짐 "
                               "(회전 방향은 아래 회전축 슬라이더가 따로 담당)")
         spin_axis = st.slider("회전축 (°)", 0.0, 360.0,
-                              float(st.session_state.inp['spin_axis']), 5.0,
+                              float(st.session_state.inp['spin_axis']), 5.0, format="%.0f",
                               help="회전축 방향(시계 방향, 0–360°) · ax·az와 별개로 판별에 큰 영향 · "
                                    "2026 실측 평균: 포심 215° 싱커 225° 체인지업 242° 스플리터 238° "
                                    "커터 185° 슬라이더 122°(편차 큼) 커브 44°")
-        ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, key="ax_slider",
+        ax_ = st.slider("수평 무브먼트 (ax)", -30.0, 30.0, step=0.5, format="%.1f", key="ax_slider",
                         help="우완 기준 패스트볼 계열은 음수, 변화구 계열(SL·CU·FC)은 양수 쪽 · "
                              "스트라이크존을 클릭하면 자동으로 맞춰집니다")
-        az = st.slider("수직 무브먼트 (az)", *AZ_RANGE, step=0.5, key="az_slider",
+        az = st.slider("수직 무브먼트 (az)", *AZ_RANGE, step=0.5, format="%.1f", key="az_slider",
                        help="양수=포심(떠오름), 음수=싱커(가라앉음) · 실측은 약 -50에서 0 사이 · "
                             "존 클릭 시엔 그 위치에 닿도록 범위 밖 값 가능")
         ext = st.slider("릴리스 익스텐션 (ft)", 4.5, 8.0,
-                        float(st.session_state.inp['release_extension']), 0.1,
+                        float(st.session_state.inp['release_extension']), 0.1, format="%.1f",
                         help="투수판에서 릴리스 지점까지 앞으로 나온 거리 · 클수록 "
                              "홈플레이트에 더 가까이서 공을 놓음")
-        rx = st.slider("릴리스 좌우 (ft)", *RX_RANGE, step=0.1, key="rx_slider",
+        rx = st.slider("릴리스 좌우 (ft)", *RX_RANGE, step=0.1, format="%.1f", key="rx_slider",
                        help="홈플레이트 중심 기준 릴리스 지점의 좌우 위치 · 투구 손과 자동 연동 · "
                             "음수 = 우완(1루쪽), 양수 = 좌완(3루쪽)")
         rz = st.slider("릴리스 높이 (ft)", 3.5, 7.2,
-                       float(st.session_state.inp['release_pos_z']), 0.1,
+                       float(st.session_state.inp['release_pos_z']), 0.1, format="%.1f",
                        help="공을 놓는 지점의 지면 기준 높이 · 암슬롯을 반영하며 높을수록 "
                             "오버핸드, 낮을수록 사이드암 쪽")
 
@@ -1182,7 +1313,7 @@ with st.sidebar:
         )
         favs = st.session_state.favorites
         if favs:
-            st.markdown('<div class="pw-label">⭐ 즐겨찾기 (이번 세션)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="pw-label">즐겨찾기 (이번 세션)</div>', unsafe_allow_html=True)
             for f in favs:
                 # 구버전 세션엔 'label' 없이 {'id','name'}만 있을 수 있음 — 배포 중 세션이
                 # 유지되면 즐겨찾기 스키마가 바뀌어도 session_state는 그대로 남는다.
@@ -1191,14 +1322,14 @@ with st.sidebar:
                     st.rerun()
 
         query = st.text_input(
-            "투수 이름 (2글자 이상, 영어 · 비워두면 날짜로만 검색)",
+            "투수 이름 (영어 2글자 이상, 비우면 날짜로 검색)",
             placeholder="Gerrit Cole", key="pitcher_query",
         ).strip()
 
         if query and contains_korean(query):
             st.warning("영어로 입력해주세요 (예: Gerrit Cole).")
         elif len(query) >= 2:
-            with st.spinner(f"'{query}' 검색 중..."):
+            with st.spinner(f"'{query}' 검색 중…"):
                 try:
                     candidates = search_pitchers(query)
                 except requests.exceptions.RequestException as e:
@@ -1206,21 +1337,16 @@ with st.sidebar:
                     st.error(f"선수 검색에 실패했습니다: {e}")
 
             if candidates is not None and not candidates:
-                st.error("선수를 찾을 수 없습니다.")
+                st.error("선수를 찾을 수 없습니다. 영문 철자를 확인하거나 성만 입력해 보세요.")
             elif candidates:
                 options = {career_label(c): c for c in candidates}
-                c_star, c_select = st.columns([1, 11])
-                choice = c_select.selectbox("검색 결과", options=list(options.keys()))
+                choice = st.selectbox("검색 결과", options=list(options.keys()))
                 chosen = options[choice]
                 st.session_state.p_throws = chosen['throws']
 
                 is_fav = any(f['id'] == chosen['id'] for f in st.session_state.favorites)
-                c_star.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
-                # 이모지(⭐/☆) 글리프가 없는 폰트/브라우저에서 빈 버튼으로 보이는 문제가
-                # 있어, Streamlit에 내장된 Material Symbols 아이콘으로 대체한다.
-                if c_star.button("", icon=":material/star:" if is_fav else ":material/star_border:",
-                                  key=f"fav_toggle_{chosen['id']}",
-                                  help="즐겨찾기 해제" if is_fav else "즐겨찾기에 추가"):
+                # 아이콘만 있는 버튼 대신 체크박스 — 이름·선택 상태가 화면 낭독기에도 전달된다.
+                if st.checkbox("즐겨찾기", value=is_fav, key=f"fav_toggle_{chosen['id']}") != is_fav:
                     toggle_favorite(chosen['id'], chosen['name'], choice)
                     st.rerun()
 
@@ -1234,15 +1360,17 @@ with st.sidebar:
                     min_d, max_d, def_start, def_end = bounds
                     dc1, dc2 = st.columns(2)
                     start_d = dc1.date_input("시작일", value=def_start,
-                                              min_value=min_d, max_value=max_d, key="pitcher_start")
+                                              min_value=min_d, max_value=max_d,
+                                              key=f"pitcher_start_{chosen['id']}")
                     end_d = dc2.date_input("종료일", value=def_end,
-                                            min_value=min_d, max_value=max_d, key="pitcher_end")
+                                            min_value=min_d, max_value=max_d,
+                                            key=f"pitcher_end_{chosen['id']}")
 
                     if start_d > end_d:
                         st.error("시작일이 종료일보다 늦을 수 없습니다.")
                     else:
                         with st.spinner(
-                            f"{chosen['name']} 선수의 {start_d}~{end_d} 투구 데이터를 가져오는 중..."
+                            f"{chosen['name']} 선수의 {start_d}~{end_d} 투구 데이터를 가져오는 중…"
                         ):
                             df = fetch_pitcher_statcast(chosen['id'], str(start_d), str(end_d))
 
@@ -1282,21 +1410,26 @@ with st.sidebar:
                     f"최대 {MAX_DATE_ONLY_DAYS}일 범위까지만 지원합니다. 범위를 좁혀주세요."
                 )
             else:
-                with st.spinner(f"{start_d}~{end_d} 전체 투구 데이터를 가져오는 중..."):
-                    df = fetch_statcast_range(str(start_d), str(end_d))
+                _req = (str(start_d), str(end_d))
+                st.caption("리그 전체 투구를 받아 오므로 시간이 걸릴 수 있어요.")
+                if st.button("이 기간 조회", key="range_go"):
+                    st.session_state["_range_req"] = _req
+                if st.session_state.get("_range_req") == _req:
+                    with st.spinner(f"{start_d}~{end_d} 전체 투구 데이터를 가져오는 중…"):
+                        df = fetch_statcast_range(str(start_d), str(end_d))
 
-                if df.empty:
-                    st.warning("해당 기간에 투구 기록이 없습니다 (시즌 오프일 수 있습니다).")
-                else:
-                    total = len(df)
-                    if total > MAX_DATE_ONLY_ROWS:
-                        st.info(
-                            f"총 {total:,}건 중 {MAX_DATE_ONLY_ROWS}건만 표시합니다. "
-                            "날짜 범위를 좁히면 더 정확히 볼 수 있어요."
-                        )
-                        df = df.head(MAX_DATE_ONLY_ROWS)
-                    render_pitch_mix(df)
-                    select_and_predict_from_df(df)
+                    if df.empty:
+                        st.warning("해당 기간에 투구 기록이 없습니다 (시즌 오프일 수 있습니다).")
+                    else:
+                        total = len(df)
+                        if total > MAX_DATE_ONLY_ROWS:
+                            st.info(
+                                f"총 {total:,}건 중 {MAX_DATE_ONLY_ROWS}건만 표시합니다. "
+                                "날짜 범위를 좁히면 더 정확히 볼 수 있어요."
+                            )
+                            df = df.head(MAX_DATE_ONLY_ROWS)
+                        render_pitch_mix(df)
+                        select_and_predict_from_df(df)
 
     if input_mode == "직접 조작":
         st.markdown("---")
@@ -1313,21 +1446,38 @@ def summary_card():
     """예측 요약 스트립 — 각 탭 바 바로 아래에 반복 렌더해 어느 탭에서도 보이게 한다.
     칩 자체가 테두리를 가지므로 바깥 카드로 한 번 더 감싸지 않는다(이중 박스 방지)."""
     if label:
-        render_summary(label, conf, inf_ms)
+        render_summary(label, conf, inf_ms, st.session_state.get('actual_pitch'))
 
 
 left, right = st.columns([2.2, 1], gap="large")
 
+nav = st.session_state.get("_pitch_nav")
+
 with left:
-    tab_dash, tab_traj, tab_model = st.tabs(["대시보드", "궤적 분석", "모델 정보"])
+    if nav:
+        with st.container(key="pitch_nav"):
+            c_prev, c_mid, c_next = st.columns([1, 2.4, 1])
+            c_prev.button("이전", icon=":material/chevron_left:", on_click=_step_pitch,
+                          args=(-1, nav["n"], nav["tkey"]), disabled=nav["idx"] == 0,
+                          use_container_width=True, key="pitch_prev")
+            c_mid.markdown(f'<div class="pw-nav"><b>{nav["idx"] + 1} / {nav["n"]}구</b><br>{nav["info"]}</div>',
+                           unsafe_allow_html=True)
+            c_next.button("다음", icon=":material/chevron_right:", on_click=_step_pitch,
+                          args=(1, nav["n"], nav["tkey"]), disabled=nav["idx"] == nav["n"] - 1,
+                          use_container_width=True, key="pitch_next")
+    tab_names = ["대시보드", "궤적 분석"] + (["투구 목록"] if nav else []) + ["모델 정보"]
+    tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    tab_dash, tab_traj, tab_model = tabs["대시보드"], tabs["궤적 분석"], tabs["모델 정보"]
 
     with tab_dash:
         summary_card()
         if label and proba:
-            with st.container(border=True):
-                render_prob_dist(proba, label)
-            with st.container(border=True):
+            render_prob_dist(proba, label)
+            c_mv, c_zone = st.columns(2)
+            with c_mv, st.container(border=True):
                 render_movement(inp)
+            with c_zone, st.container(border=True):
+                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
         else:
             with st.container(border=True):
                 st.markdown("사이드바에서 값을 조절하거나 투수를 선택하면 "
@@ -1335,11 +1485,17 @@ with left:
 
     with tab_traj:
         summary_card()
-        if label and proba:
-            with st.container(border=True):
-                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
         with st.container(border=True):
             render_paths(inp, st.session_state.p_throws)
+
+    if nav:
+        with tabs["투구 목록"]:
+            summary_card()
+            st.dataframe(nav["table"], on_select="rerun", selection_mode="single-row", key=nav["tkey"],
+                         hide_index=True, use_container_width=True,
+                         column_config={"구속": st.column_config.NumberColumn(format="%.1f")},
+                         height=min(36 * (nav["n"] + 1) + 3, 460))
+            st.caption("행을 누르면 그 투구로 바뀝니다. 표는 투구 순서(타석, 구)대로입니다.")
 
     with tab_model:
         summary_card()
