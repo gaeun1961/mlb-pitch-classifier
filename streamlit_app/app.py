@@ -1199,8 +1199,9 @@ def render_feature_card(f, c, mx, label):
 
 def _explanation_body():
     """설명이 백그라운드 스레드에서 준비되면 자동으로 표시한다. 설명 작업이 진행 중일 때만
-    1초마다 이 프래그먼트를 다시 그려 확인하고(나머지 UI는 영향 없음), 완료되면 앱을 한 번
-    다시 실행해 폴링 없는 프래그먼트로 바꾼다."""
+    1초마다 이 프래그먼트를 다시 그려 확인한다(나머지 UI는 영향 없음).
+    완료돼도 앱 전체를 다시 실행하지 않는다 — 전체 재실행은 그 순간 사용자가 열어 둔
+    드롭다운을 닫아 버리고 클릭도 놓치게 한다. 폴링은 다음 번 사용자 조작(전체 실행) 때 멈춘다."""
     future = st.session_state.get('_explain_future')
     if future is not None and future.done():
         try:
@@ -1208,8 +1209,6 @@ def _explanation_body():
         except Exception:
             st.session_state.explanation = None
         st.session_state['_explain_future'] = None
-        if st.session_state.get('_explain_polling'):
-            st.rerun()          # 폴링 중지(run_every 없는 프래그먼트로 다시 그림)
 
     explanation = st.session_state.explanation
     if explanation:
@@ -1231,7 +1230,6 @@ def render_shap_panel(attribution, conf, label):
         return
 
     pending = st.session_state.get('_explain_future') is not None
-    st.session_state['_explain_polling'] = pending
     with st.expander("AI 설명 보기"):
         st.fragment(_explanation_body, run_every=1 if pending else None)()
 
