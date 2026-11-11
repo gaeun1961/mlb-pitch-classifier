@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -980,7 +981,7 @@ def render_paths(inp, p_throws):
     fig.update_layout(
         height=620, margin=dict(l=44, r=10, t=64, b=36), plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        updatemenus=[dict(type='buttons', direction='left', x=0, y=1.13, xanchor='left', yanchor='top',
+        updatemenus=[dict(type='buttons', direction='left', x=1, y=1.13, xanchor='right', yanchor='top',
                           showactive=False, pad=dict(l=0, t=0), bgcolor='#ffffff', bordercolor='#c2c6cc',
                           font=dict(size=12, color=INK),
                           buttons=[dict(label='재생', method='animate',
@@ -998,6 +999,27 @@ def render_paths(inp, p_throws):
     fig.update_xaxes(title_text='좌우 (ft)', range=[-2.5, 2.5], row=2, col=2)
     fig.update_yaxes(title_text='높이 (ft)', range=[0, 7.2], row=2, col=2)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    # 자동 재생: Plotly엔 "처음부터 재생" 옵션이 없어서, 높이 0짜리 iframe에서 부모 문서의 재생 버튼을 한 번 눌러 준다.
+    # nonce(궤적을 정하는 값)가 같으면 iframe 내용이 같아 다시 실행되지 않으므로, 입력이 바뀔 때만 다시 던진다.
+    # 움직임을 줄이도록 설정한 사용자는 건너뛴다. ponytail: 부모 DOM을 건드리는 방식이라 Streamlit/Plotly가 바뀌면 깨질 수 있음 —
+    # 깨져도 재생 버튼은 그대로 있어 수동 재생은 된다.
+    nonce = "_".join(f"{inp[k]:.2f}" for k in ('release_speed', 'plate_x', 'plate_z', 'ax', 'az', 'release_pos_x',
+                                                'release_pos_z', 'release_extension')) + f"_{speed}"
+    components.html(AUTOPLAY_HTML.replace("__NONCE__", nonce), height=0)
+
+
+AUTOPLAY_HTML = """<script>
+if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  var doc = window.parent.document, tries = 0;
+  (function go() {
+    var btns = [].slice.call(doc.querySelectorAll('.updatemenu-button')).filter(function (b) {
+      return b.textContent.indexOf('재생') === 0 && b.textContent.indexOf('일시') < 0; });
+    if (btns.length) { btns[btns.length - 1].dispatchEvent(new MouseEvent('click', {bubbles: true})); }
+    else if (tries++ < 40) { setTimeout(go, 150); }
+  })();
+}
+// __NONCE__
+</script>"""
 
 
 def render_model_info():
