@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 
 from utils import (
     predict, explain, compute_trajectory_side, compute_trajectory_top,
-    FEATURE_COLS, PITCH_NAMES, SAMPLE_VALUES, PITCH_DIST, games_from_pitches,
+    FEATURE_COLS, PITCH_NAMES, PITCH_COLORS, SAMPLE_VALUES, PITCH_DIST, games_from_pitches,
 )
 
 st.set_page_config(
@@ -172,6 +172,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:16px 20px;}
 
 div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
 
+[data-testid="stMultiSelectTagsContainer"] [data-tag]{background:var(--chip-gray) !important;color:var(--text) !important;}
 .pw-logo{display:flex;align-items:center;gap:8px;margin:0 0 12px;}
 .pw-logo span{font-weight:700;font-size:1.05rem;color:var(--text);}
 
@@ -527,7 +528,7 @@ def select_and_predict(df_valid, key=None):
 
     row = df_valid.iloc[idx]
     st.session_state["_pitch_nav"] = dict(n=n, idx=idx, tkey=tkey, table=pitch_table(df_valid),
-                                          info=_pitch_info(row))
+                                          info=_pitch_info(row), df=df_valid)
     pt = row.get('pitch_type')
     st.session_state["actual_pitch"] = pt if isinstance(pt, str) else None
     inp = {col: float(row[col]) for col in FEATURE_COLS}
@@ -1019,30 +1020,87 @@ def render_model_info():
     st.caption("gradient×input 기여도의 절댓값을 평가셋 전체에 평균 · 회전축(spin_axis)이 가장 크게 기여")
 
 
-def render_pitch_mix(df):
-    """최근 투구의 구종별 사용 비율을 가로 막대 차트로 보여준다 (단색 회색)."""
-    if 'pitch_type' not in df.columns:
-        return
-    counts = df['pitch_type'].dropna()
-    counts = counts[counts.isin(PITCH_NAMES.keys())]
-    if counts.empty:
-        return
+def game_filters(g, game_pk):
+    """한 경기의 구종·이닝·타자 손 필터(사이드바, 비워 두면 전체). (필터링한 df, 선택 상태 서명)을 돌려준다.
+    위젯 key에 경기를 넣어 경기를 바꾸면 필터도 초기화된다."""
+    types = [t for t in g['pitch_type'].value_counts().index if isinstance(t, str)]
+    innings = sorted(g['inning'].dropna().astype(int).unique())
+    with st.expander("필터 (구종, 이닝, 타자)"):
+        sel_t = st.multiselect("구종", types, format_func=pitch_name, placeholder="전체", key=f"flt_t_{game_pk}")
+        sel_i = st.multiselect("이닝", innings, format_func=lambda i: f"{i}회", placeholder="전체",
+                               key=f"flt_i_{game_pk}")
+        stand = st.radio("타자 손", ["전체", "좌타자", "우타자"], horizontal=True, key=f"flt_s_{game_pk}")
+    out = g
+    if sel_t:   # 비어 있으면 전체
+        out = out[out['pitch_type'].isin(sel_t)]
+    if sel_i:
+        out = out[out['inning'].isin(sel_i)]
+    if stand != "전체":
+        out = out[out['stand'] == ('L' if stand == "좌타자" else 'R')]
+    return out, f"{','.join(sel_t)}_{','.join(map(str, sel_i))}_{stand}"
 
-    ratio = (counts.value_counts(normalize=True) * 100).sort_values()
-    fig = go.Figure(go.Bar(
-        x=ratio.values, y=[PITCH_NAMES.get(k, k) for k in ratio.index], orientation='h',
-        marker_color=GRAY,
-        text=[f'{v:.0f}%' for v in ratio.values], textposition='outside',
-    ))
+
+def _by_type_scatter(d, x, y, cur, xaxis, yaxis, shapes):
+    """구종별 색 산점도. cur = 지금 보고 있는 투구(빨간 링으로 표시)."""
+    fig = go.Figure()
+    for sh in shapes:
+        fig.add_shape(**sh)
+    for t, g in d.groupby('pitch_type'):
+        fig.add_trace(go.Scatter(x=g[x], y=g[y], mode='markers', name=pitch_name(t),
+                                 marker=dict(size=7, color=PITCH_COLORS.get(t, GRAY), opacity=0.8),
+                                 hovertemplate=f"{pitch_name(t)}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=[cur[x]], y=[cur[y]], mode='markers', showlegend=False, hoverinfo='skip',
+                             marker=dict(size=16, color='rgba(0,0,0,0)', line=dict(color=ACCENT_HEX, width=2.5))))
     fig.update_layout(
-        height=max(120, 40 * len(ratio)), margin=dict(l=10, r=30, t=10, b=30),
-        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='%', range=[0, max(ratio.values) * 1.25], gridcolor=GRID, zeroline=False),
-        yaxis=dict(gridcolor='rgba(0,0,0,0)'),
-    )
-    st.caption("최근 구종 사용 비율")
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        height=400, margin=dict(l=40, r=8, t=8, b=110), plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=AXIS_TEXT, size=11), xaxis=xaxis, yaxis=yaxis,
+        legend=dict(orientation='h', yanchor='top', y=-0.2, x=0, font=dict(size=10), tracegroupgap=2))
+    return fig
+
+
+def render_game_summary(df, idx):
+    """지금 보고 있는 투구 묶음(경기, 필터 적용)의 요약: 구종별 표 + 무브먼트·존 분포. 빨간 링 = 현재 투구."""
+    d = df[df['pitch_type'].notna()].copy()
+    if d.empty:
+        st.info("구종 정보가 있는 투구가 없습니다.")
+        return
+    cur = df.iloc[idx]
+    d['mx'], d['mz'] = d['pfx_x'] * 12.0, d['pfx_z'] * 12.0
+    cur = cur.copy()
+    cur['mx'], cur['mz'] = cur['pfx_x'] * 12.0, cur['pfx_z'] * 12.0
+    st_ = d.groupby('pitch_type').agg(n=('release_speed', 'size'), v=('release_speed', 'mean'),
+                                      mx=('mx', 'mean'), mz=('mz', 'mean')).sort_values('n', ascending=False)
+    table = pd.DataFrame({'구종': [pitch_name(c) for c in st_.index], '투구수': st_['n'].values,
+                          '비율': st_['n'].values / len(d) * 100, '평균 구속': st_['v'].values,
+                          '수평(in)': st_['mx'].values, '수직(in)': st_['mz'].values})
+    st.dataframe(table, hide_index=True, use_container_width=True, height=min(36 * (len(table) + 1) + 3, 330),
+                 column_config={
+                     '비율': st.column_config.ProgressColumn('비율', format="%.0f%%", min_value=0, max_value=100),
+                     '평균 구속': st.column_config.NumberColumn(format="%.1f"),
+                     '구종': st.column_config.TextColumn(width=120),
+                     '투구수': st.column_config.NumberColumn(width="small"),
+                     '수평(in)': st.column_config.NumberColumn(format="%.1f", width="small"),
+                     '수직(in)': st.column_config.NumberColumn(format="%.1f", width="small")})
+    st.caption("무브먼트는 Statcast 유도 무브먼트(수평, 수직) 평균입니다.")
+    c1, c2 = st.columns(2)
+    with c1, st.container(border=True):
+        st.markdown('<div class="pw-label">구종별 무브먼트</div>', unsafe_allow_html=True)
+        fig = _by_type_scatter(
+            d, 'mx', 'mz', cur,
+            dict(title='수평 (in)', range=[-30, 30], gridcolor=GRID, zeroline=False, scaleanchor='y'),
+            dict(title='수직 (in, 위가 라이징)', range=[-30, 30], gridcolor=GRID, zeroline=False),
+            [dict(type="circle", x0=-r, y0=-r, x1=r, y1=r, layer="below", line=dict(color="#e5e5e5", width=1, dash="dot"))
+             for r in (12, 24)])
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    with c2, st.container(border=True):
+        st.markdown('<div class="pw-label">구종별 투구 위치 (주심 시점)</div>', unsafe_allow_html=True)
+        fig = _by_type_scatter(
+            d, 'plate_x', 'plate_z', cur,
+            dict(title='좌우 (ft)', range=[-2.5, 2.5], gridcolor=GRID, zeroline=False, scaleanchor='y'),
+            dict(title='높이 (ft)', range=[0, 5], gridcolor=GRID, zeroline=False),
+            [dict(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5, line=dict(color=ZONE_LINE, width=2),
+                  fillcolor="rgba(138,143,152,0.06)", layer="below")])
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
 def _waterfall_contribs(attribution, conf):
@@ -1378,17 +1436,19 @@ with st.sidebar:
                             st.warning("해당 기간 투구 기록이 없습니다. "
                                        "타자로만 뛴 기간일 수 있어요.")
                         elif 'game_pk' in df.columns:
-                            render_pitch_mix(df)
                             games = games_from_pitches(df)
                             game_pk = st.selectbox(
                                 f"등판 ({len(games)}경기)", options=games.index,
                                 format_func=lambda g: games.loc[g, 'label'],
                             )
-                            df_valid = prepare_pitches(df[df['game_pk'] == game_pk])
-                            if df_valid is not None:
-                                select_and_predict(df_valid, key=f"pitch_{game_pk}")
+                            g, flt_sig = game_filters(df[df['game_pk'] == game_pk], game_pk)
+                            if g.empty:
+                                st.warning("필터 조건에 맞는 투구가 없습니다.")
+                            else:
+                                df_valid = prepare_pitches(g)
+                                if df_valid is not None:
+                                    select_and_predict(df_valid, key=f"pitch_{game_pk}_{flt_sig}")
                         else:
-                            render_pitch_mix(df)
                             select_and_predict_from_df(df)
         elif query:
             st.caption("2글자 이상 입력하면 검색됩니다.")
@@ -1428,7 +1488,6 @@ with st.sidebar:
                                 "날짜 범위를 좁히면 더 정확히 볼 수 있어요."
                             )
                             df = df.head(MAX_DATE_ONLY_ROWS)
-                        render_pitch_mix(df)
                         select_and_predict_from_df(df)
 
     if input_mode == "직접 조작":
@@ -1465,7 +1524,9 @@ with left:
             c_next.button("다음", icon=":material/chevron_right:", on_click=_step_pitch,
                           args=(1, nav["n"], nav["tkey"]), disabled=nav["idx"] == nav["n"] - 1,
                           use_container_width=True, key="pitch_next")
-    tab_names = ["대시보드", "궤적 분석"] + (["투구 목록"] if nav else []) + ["모델 정보"]
+    has_sum = bool(nav) and 'pitch_type' in nav["df"].columns
+    tab_names = (["대시보드", "궤적 분석"] + (["투구 목록"] if nav else []) + (["경기 요약"] if has_sum else [])
+                 + ["모델 정보"])
     tabs = dict(zip(tab_names, st.tabs(tab_names)))
     tab_dash, tab_traj, tab_model = tabs["대시보드"], tabs["궤적 분석"], tabs["모델 정보"]
 
@@ -1496,6 +1557,11 @@ with left:
                          column_config={"구속": st.column_config.NumberColumn(format="%.1f")},
                          height=min(36 * (nav["n"] + 1) + 3, 460))
             st.caption("행을 누르면 그 투구로 바뀝니다. 표는 투구 순서(타석, 구)대로입니다.")
+
+    if has_sum:
+        with tabs["경기 요약"]:
+            summary_card()
+            render_game_summary(nav["df"], nav["idx"])
 
     with tab_model:
         summary_card()
