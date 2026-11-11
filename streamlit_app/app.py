@@ -193,8 +193,7 @@ div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--ac
 .pw-sum-meta span + span{margin-left:12px;}
 
 /* 구종별 확률 바 — 전부 회색, 예측 구종만 빨강 */
-.pw-bars{padding-bottom:12px;display:grid;grid-template-columns:1fr 1fr;column-gap:24px;}
-@media (max-width:640px){.pw-bars{grid-template-columns:1fr;}}
+.pw-bars{padding-bottom:4px;}
 .pw-bar-row{display:flex;align-items:center;gap:12px;margin:6px 0;}
 .pw-bar-name{width:84px;font-size:0.82rem;color:var(--text-2);flex:none;}
 .pw-bar-track{flex:1;height:8px;background:var(--track);border-radius:2px;overflow:hidden;}
@@ -856,68 +855,18 @@ def render_movement(inp):
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 
-def render_strikezone(inp, clickable=False):
-    """주심(포수 뒤)이 마운드를 바라본 시점. 회색 점 = 릴리스, 빨간 점 = 플레이트
-    통과 위치. clickable이면 존을 클릭해 공 위치를 지정할 수 있다."""
-    tip = (
-        "좌우(ax)·수직(az) 무브먼트 슬라이더가 클릭한 위치에 실제로 도달하도록 역산되어 "
-        "바뀝니다 — 구종이 무엇이 되는지는 신경 쓰지 않고, 그 위치에 맞는 움직임 값을 그대로 "
-        "반영해요. 그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다. "
-        "구속·회전수·익스텐션은 그대로 유지됩니다. 회색 점 = 릴리스, 빨간 점 = 플레이트 통과 위치."
-        if clickable else
-        "주심이 마운드를 바라본 시점 · 회색 점 = 릴리스 · 빨간 점 = 플레이트 통과 위치"
-    )
-    st.markdown(
-        f'<div class="pw-label">스트라이크존{" (클릭해서 위치 지정)" if clickable else ""} {help_icon(tip)}</div>',
-        unsafe_allow_html=True)
-    fig = go.Figure()
-    # 평균 존: 홈플레이트 폭 ±0.83ft(17인치 절반 + 볼 반경), 무릎~겨드랑이 1.5~3.5ft 근사
-    fig.add_shape(type="rect", x0=-0.83, x1=0.83, y0=1.5, y1=3.5,
-                  line=dict(color=ZONE_LINE, width=2),
-                  fillcolor="rgba(138,143,152,0.06)", layer="below")
+def render_paths(inp, p_throws, clickable=False):
+    """투구 궤적을 한 차트에 묶고 한 번에 움직인다.
+    측면뷰·상단뷰 = 투수판에서 홈플레이트로 날아가는 모양, 주심 시점 = 날아와서 점점 커지는 공.
+    clickable이면 주심 시점을 클릭해 공이 도달할 위치를 지정할 수 있다."""
+    tip = ("측면뷰와 상단뷰는 투수판에서 홈플레이트로 날아가는 모양, 주심 시점은 공이 날아와 점점 커지는 모양입니다. "
+           "회색 사각형 = 스트라이크존. 값이 바뀌면 자동으로 다시 날아가고, 재생 버튼(마우스·터치용)으로 다시 볼 수 있습니다.")
     if clickable:
-        # 옅은 격자 = 클릭 히트타깃(≈0.15ft 간격 ≈ 이 차트 크기에서 5px). 클릭하면 가장 가까운 점이 선택된다.
-        # 완전 투명 + hoverinfo='skip'이면 Plotly가 클릭 이벤트를 안 잡으므로 옅게라도 그린다.
-        gx, gy = np.meshgrid(np.arange(-1.8, 1.81, 0.15), np.arange(0.3, 4.81, 0.15))
-        fig.add_trace(go.Scatter(x=gx.ravel(), y=gy.ravel(), mode='markers',
-                                 name='click', marker=dict(size=6, color='rgba(140,143,152,0.10)'),
-                                 hoverinfo='none'))
-    # 릴리스 지점(회색). plate_x/release_pos_x는 Statcast와 같은 포수·주심 시점 좌표
-    fig.add_trace(go.Scatter(
-        x=[inp['release_pos_x']], y=[inp['release_pos_z']], mode='markers',
-        marker=dict(color=GRAY, size=13, line=dict(color='white', width=1.5)),
-        hoverinfo='skip',
-    ))
-    fig.add_annotation(x=inp['release_pos_x'], y=inp['release_pos_z'], yshift=13,
-                       text="릴리스", showarrow=False, font=dict(size=9, color=AXIS_TEXT))
-    fig.add_trace(go.Scatter(
-        x=[inp['plate_x']], y=[inp['plate_z']], mode='markers',
-        marker=dict(color=ACCENT_HEX, size=20, line=dict(color='white', width=1.5)),
-        hoverinfo='skip',
-    ))
-    fig.update_layout(
-        height=300, margin=dict(l=40, r=8, t=8, b=32),
-        plot_bgcolor=PLOT_BG, paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=AXIS_TEXT, size=11), showlegend=False,
-        xaxis=dict(title='좌우 (ft, 주심 시점)', range=[-2.5, 2.5], gridcolor=GRID, constrain='domain',
-                   zeroline=False, scaleanchor='y'),
-        yaxis=dict(title='높이 (ft)', range=[0, 7.5], gridcolor=GRID, zeroline=False),
-    )
-    if clickable:
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False},
-                        on_select="rerun", selection_mode="points", key="zone_click")
-    else:
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-
-def render_paths(inp, p_throws):
-    """투구 궤적을 한 차트에 묶고 재생 버튼 하나로 동시에 움직인다.
-    측면뷰·상단뷰 = 투수판에서 홈플레이트로 날아가는 모양, 주심 시점 = 날아와서 점점 커지는 공."""
-    st.markdown('<div class="pw-label">투구 궤적 '
-                + help_icon("재생을 누르면 공이 날아갑니다. 측면뷰와 상단뷰는 투수판에서 홈플레이트로 날아가는 모양, "
-                            "주심 시점은 공이 날아와 점점 커지는 모양입니다. 회색 사각형 = 스트라이크존. "
-                            "재생 버튼은 마우스·터치용이며, 자동으로 재생되지 않습니다.") + '</div>',
-                unsafe_allow_html=True)
+        tip += (" 주심 시점을 클릭하면 공이 그 위치에 도달하도록 좌우(ax)·수직(az) 무브먼트 슬라이더가 역산되어 바뀝니다. "
+                "구종이 무엇이 되는지는 신경 쓰지 않고 그 위치에 맞는 움직임 값을 그대로 반영해서, 클릭 한 번에 예측 구종이 "
+                "크게 바뀔 수 있습니다. 구속·회전수·익스텐션은 그대로 유지됩니다.")
+    st.markdown('<div class="pw-label">투구 궤적' + (' (주심 시점을 클릭해 위치 지정)' if clickable else '') + ' '
+                + help_icon(tip) + '</div>', unsafe_allow_html=True)
     speed = st.radio("재생 속도", ["슬로모션", "실제 속도"], horizontal=True, key="traj_speed",
                      label_visibility="collapsed")
     side_x, side_z = compute_trajectory_side(inp)
@@ -956,7 +905,14 @@ def render_paths(inp, p_throws):
                   fillcolor="rgba(138,143,152,0.06)", layer="below", row=2, col=2)
 
     paths = [(side_x, side_z, 1, 1), (top_x, top_y, 2, 1), (top_x, side_z, 2, 2)]   # (x, y, row, col)
-    # trace 0~2: 전체 경로(옅은 빨강) · 3~5: 움직이는 공. 프레임엔 공만 담아 전송량·렌더 비용을 줄인다
+    # (클릭 가능하면) 맨 앞 trace = 옅은 격자: 클릭 히트타깃(≈0.15ft 간격). 클릭하면 가장 가까운 점이 선택된다.
+    # 완전 투명 + hoverinfo='skip'이면 Plotly가 클릭 이벤트를 안 잡으므로 옅게라도 그린다.
+    k0 = 1 if clickable else 0
+    if clickable:
+        gx, gy = np.meshgrid(np.arange(-1.8, 1.81, 0.15), np.arange(0.3, 4.81, 0.15))
+        fig.add_trace(go.Scatter(x=gx.ravel(), y=gy.ravel(), mode='markers', name='click',
+                                 marker=dict(size=6, color='rgba(140,143,152,0.10)'), hoverinfo='none'), row=2, col=2)
+    # trace k0+0~2: 전체 경로(옅은 빨강) · k0+3~5: 움직이는 공. 프레임엔 공만 담아 전송량·렌더 비용을 줄인다
     for x, y, r, c in paths:
         fig.add_trace(go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgba(197,54,55,0.35)', width=3),
                                  hoverinfo='skip'), row=r, col=c)
@@ -966,14 +922,14 @@ def render_paths(inp, p_throws):
 
     def dyn(k):
         """k번째 지점에 있는 공 3개(측면·상단·주심 시점)."""
-        return [go.Scatter(x=[x[k - 1]], y=[y[k - 1]], mode='markers',
+        return [go.Scatter(x=[x[k - 1]], y=[y[k - 1]], mode='markers', hoverinfo='skip',
                            marker=dict(color=ACCENT_HEX, size=ball_size(k) if idx == 2 else 9,
                                        line=dict(color='white', width=1.5)))
                 for idx, (x, y, _, _) in enumerate(paths)]
 
     for tr, (_, _, r, c) in zip(dyn(n), paths):   # 처음엔 도착한 모습(= 이전의 정지 화면)
         fig.add_trace(tr, row=r, col=c)
-    fig.frames = [go.Frame(data=dyn(k), traces=[3, 4, 5], name=str(k)) for k in range(1, n + 1)]
+    fig.frames = [go.Frame(data=dyn(k), traces=[k0 + 3, k0 + 4, k0 + 5], name=str(k)) for k in range(1, n + 1)]
 
     # 날아가는 시간(초) = 거리 / 전진 속도. 슬로모션은 5배 느리게. 브라우저 한계로 프레임당 최소 16ms.
     flight_ms = (PITCH_DIST - inp['release_extension']) / max(abs(inp['vy0']), 1) * 1000
@@ -998,7 +954,11 @@ def render_paths(inp, p_throws):
     fig.update_yaxes(title_text='거리 (ft, 아래가 홈플레이트)', range=[PITCH_DIST + 6, -4], row=2, col=1)
     fig.update_xaxes(title_text='좌우 (ft)', range=[-2.5, 2.5], row=2, col=2)
     fig.update_yaxes(title_text='높이 (ft)', range=[0, 7.2], row=2, col=2)
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    if clickable:
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False},
+                        on_select="rerun", selection_mode="points", key="zone_click")
+    else:
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     # 자동 재생: Plotly엔 "처음부터 재생" 옵션이 없어서, 높이 0짜리 iframe에서 부모 문서의 재생 버튼을 한 번 눌러 준다.
     # nonce(궤적을 정하는 값)가 같으면 iframe 내용이 같아 다시 실행되지 않으므로, 입력이 바뀔 때만 다시 던진다.
     # 움직임을 줄이도록 설정한 사용자는 건너뛴다. ponytail: 부모 DOM을 건드리는 방식이라 Streamlit/Plotly가 바뀌면 깨질 수 있음 —
@@ -1014,8 +974,11 @@ if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   (function go() {
     var btns = [].slice.call(doc.querySelectorAll('.updatemenu-button')).filter(function (b) {
       return b.textContent.indexOf('재생') === 0 && b.textContent.indexOf('일시') < 0; });
-    if (btns.length) { btns[btns.length - 1].dispatchEvent(new MouseEvent('click', {bubbles: true})); }
-    else if (tries++ < 40) { setTimeout(go, 150); }
+    var b = btns[btns.length - 1], gd = b && b.closest('.js-plotly-plot');
+    // 프레임이 등록된 뒤에야 재생이 먹는다(그 전에 누르면 아무 일도 안 일어남)
+    var ready = gd && gd._transitionData && gd._transitionData._frames && gd._transitionData._frames.length > 0;
+    if (ready) { setTimeout(function () { b.dispatchEvent(new MouseEvent('click', {bubbles: true})); }, 350); }
+    else if (tries++ < 60) { setTimeout(go, 150); }
   })();
 }
 // __NONCE__
@@ -1596,35 +1559,24 @@ with left:
                           args=(1, nav["n"], nav["tkey"]), disabled=nav["idx"] == nav["n"] - 1,
                           use_container_width=True, key="pitch_next")
     has_sum = bool(nav) and 'pitch_type' in nav["df"].columns
-    tab_names = (["대시보드", "궤적 분석"] + (["투구 목록"] if nav else []) + (["경기 요약"] if has_sum else [])
-                 + ["모델 정보"])
-    try:   # 선택된 탭을 알 수 있어야(.open) 무거운 궤적 차트를 그 탭이 열렸을 때만 만든다
-        tab_objs = st.tabs(tab_names, on_change="rerun")
-    except TypeError:   # 오래된 Streamlit: 항상 전부 그림
-        tab_objs = st.tabs(tab_names)
-    tabs = dict(zip(tab_names, tab_objs))
-    tab_dash, tab_traj, tab_model = tabs["대시보드"], tabs["궤적 분석"], tabs["모델 정보"]
+    tab_names = ["대시보드"] + (["투구 목록"] if nav else []) + (["경기 요약"] if has_sum else []) + ["모델 정보"]
+    tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    tab_dash, tab_model = tabs["대시보드"], tabs["모델 정보"]
 
     with tab_dash:
         summary_card()
         if label and proba:
-            render_prob_dist(proba, label)
-            c_mv, c_zone = st.columns(2)
+            with st.container(border=True):
+                render_paths(inp, st.session_state.p_throws, clickable=(input_mode == "직접 조작"))
+            c_prob, c_mv = st.columns(2)
+            with c_prob, st.container(border=True):
+                render_prob_dist(proba, label)
             with c_mv, st.container(border=True):
                 render_movement(inp)
-            with c_zone, st.container(border=True):
-                render_strikezone(inp, clickable=(input_mode == "직접 조작"))
         else:
             with st.container(border=True):
                 st.markdown("사이드바에서 값을 조절하거나 투수를 선택하면 "
                             "여기에 예측 결과가 표시됩니다.")
-
-    with tab_traj:
-        summary_card()
-        # 프레임 50개짜리 모션 차트는 슬라이더를 움직일 때마다 다시 만들면 반응이 느려지므로 이 탭이 열려 있을 때만
-        if getattr(tab_traj, "open", True):
-            with st.container(border=True):
-                render_paths(inp, st.session_state.p_throws)
 
     if nav:
         with tabs["투구 목록"]:
