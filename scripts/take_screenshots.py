@@ -1,6 +1,6 @@
 # take_screenshots.py - 배포 앱을 깨운 뒤 README용 스크린샷 2장을 docs/images/에 저장한다.
 #   (a) 예측 결과 화면(대시보드, 앱 기본 입력값)  (b) 모델 정보 탭
-# 화면 수치가 README와 같은지(86.0% / 0.859) 확인하고, 다르면 실패로 끝난다.
+# 화면 수치가 README와 같은지(86.7% / 0.865) 확인하고, 다르면 실패로 끝난다.
 # 실행: pip install playwright && python -m playwright install chromium && python scripts/take_screenshots.py
 
 import os
@@ -10,7 +10,7 @@ from wake_app import APP_URL, APP_READY, open_app
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'images')
 VIEWPORT = {'width': 1200, 'height': 1400}   # README 이미지 가로 1200px 이하
-EXPECTED = ['86.0%', '0.859']
+EXPECTED = ['86.7%', '0.865']
 
 
 def main():

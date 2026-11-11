@@ -1,14 +1,14 @@
 # eval_groupkfold.py - 투수 단위 GroupKFold(5) 재평가 (평가 전용, 배포 모델과 무관)
 #
-# 용도: README "검증" 단락과 streamlit_app/app.py의 성능 수치(weighted F1 0.859 ± 0.003,
-#       정확도 0.860 ± 0.003)를 낸 스크립트. 투구 단위 랜덤 분할(desktop_app/src/train.py,
+# 용도: README "검증" 단락과 streamlit_app/app.py의 성능 수치(weighted F1 0.865 ± 0.007,
+#       정확도 0.867 ± 0.008, 2024~2026)를 낸 스크립트. 투구 단위 랜덤 분할(desktop_app/src/train.py,
 #       weighted F1 0.93)은 같은 투수가 학습·테스트에 섞이므로, 투수 ID(pitcher)로 묶어
 #       처음 보는 투수 기준 성능을 잰다. 재학습 후 수치를 갱신할 때 다시 실행한다.
-# 설정: 2024+2025 정규시즌, desktop_app/src의 전처리·17개 피처·MLP(build_model) 그대로,
+# 설정: 2024~2026 시즌, desktop_app/src의 전처리·17개 피처·MLP(build_model) 그대로,
 #       seed 42, batch 512, EarlyStopping(patience 10). fold마다 학습 투수의 1/8을 투수 단위로
 #       떼어 val로 사용(약 70/10/20).
 # 필요 데이터: pybaseball 일별 캐시(~/.pybaseball/cache/get_statcast_data_from_csv_url*.parquet —
-#       pybaseball.cache.enable() 상태로 2024·2025 statcast()를 받아 두면 생김). 원본 Statcast의
+#       pybaseball.cache.enable() 상태로 2024~2026 statcast()를 받아 두면 생김). 원본 Statcast의
 #       pitcher(투수 ID) 컬럼이 필요하다. data_loader.filter_and_clean()은 이 컬럼을 버리므로
 #       desktop_app/data/*.csv 캐시로는 안 된다.
 # 실행: python scripts/eval_groupkfold.py
@@ -35,7 +35,7 @@ CACHE = os.path.expanduser(os.environ.get('PYBASEBALL_CACHE_GLOB', '~/.pybasebal
 
 cols = FEATURE_COLS + [LABEL_COL, 'pitcher', 'game_date']
 df = pd.concat([pd.read_parquet(f, columns=cols) for f in glob.glob(CACHE)], ignore_index=True)
-df = df[pd.to_datetime(df.game_date).dt.year.isin([2024, 2025])]
+df = df[pd.to_datetime(df.game_date).dt.year.isin([2024, 2025, 2026])]
 df = df[df[LABEL_COL].isin(TARGET_PITCHES)][FEATURE_COLS + [LABEL_COL, 'pitcher']].dropna()
 df = df[(df.release_speed >= 40) & (df.release_speed <= 110)]
 print('rows', len(df), 'pitchers', df.pitcher.nunique(), flush=True)
