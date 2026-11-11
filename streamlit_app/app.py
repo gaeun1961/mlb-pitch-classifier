@@ -161,16 +161,19 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
 div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:16px 20px;}
 
 /* 라벨 = 본문 글꼴 한 단계 작게, 대문자·자간 없음 */
-.pw-label{font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:12px;}
+.pw-label{position:relative;font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:12px;}
 .pw-help{position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:help;
   font-weight:700;color:var(--text-3);border:1px solid var(--text-3);border-radius:50%;
   width:16px;height:16px;font-size:11px;margin-left:6px;vertical-align:middle;}
 .pw-help::before{content:"";position:absolute;inset:-4px;}   /* 클릭·탭 영역 24px */
 .pw-help:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
-.pw-help::after{content:attr(data-tip);position:absolute;z-index:50;bottom:150%;left:-8px;width:280px;max-width:70vw;
-  padding:12px;border-radius:var(--radius);background:var(--tip-bg);color:var(--on-accent);font-size:13px;font-weight:400;
-  line-height:1.5;text-align:left;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;}
-.pw-help:hover::after,.pw-help:focus-visible::after{opacity:1;visibility:visible;}
+/* 툴팁은 아이콘이 아니라 라벨(카드 폭) 기준으로 아래에 펼친다. 아이콘 기준이면 위로 펼칠 때 화면 위쪽 카드에서 잘리고,
+   아이콘의 좌우 위치에 따라 좁은 화면에서 한쪽이 잘린다 */
+.pw-tip{position:absolute;z-index:50;top:100%;left:0;right:0;max-width:420px;margin-top:4px;padding:12px;
+  border-radius:var(--radius);background:var(--tip-bg);color:var(--on-accent);font-size:13px;font-weight:400;
+  line-height:1.5;text-align:left;white-space:normal;word-break:keep-all;overflow-wrap:break-word;
+  opacity:0;visibility:hidden;pointer-events:none;}
+.pw-help:hover + .pw-tip,.pw-help:focus-visible + .pw-tip{opacity:1;visibility:visible;}
 
 div[role="radiogroup"] label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
 
@@ -707,7 +710,8 @@ LOGO_HTML = """
 def help_icon(tip):
     """라벨 옆 도움말 ? — 키보드 포커스·화면 낭독기(aria-label)로도 읽히게."""
     t = html.escape(tip, quote=True)
-    return f'<span class="pw-help" tabindex="0" role="img" aria-label="도움말: {t}" data-tip="{t}">?</span>'
+    return (f'<span class="pw-help" tabindex="0" role="img" aria-label="도움말: {t}">?</span>'
+            f'<span class="pw-tip" aria-hidden="true">{t}</span>')
 
 
 def _flip_ax(hint):
@@ -859,12 +863,11 @@ def render_paths(inp, p_throws, clickable=False):
     """투구 궤적을 한 차트에 묶고 한 번에 움직인다.
     측면뷰·상단뷰 = 투수판에서 홈플레이트로 날아가는 모양, 주심 시점 = 날아와서 점점 커지는 공.
     clickable이면 주심 시점을 클릭해 공이 도달할 위치를 지정할 수 있다."""
-    tip = ("측면뷰와 상단뷰는 투수판에서 홈플레이트로 날아가는 모양, 주심 시점은 공이 날아와 점점 커지는 모양입니다. "
-           "회색 사각형 = 스트라이크존. 값이 바뀌면 자동으로 다시 날아가고, 재생 버튼(마우스·터치용)으로 다시 볼 수 있습니다.")
+    tip = ("측면뷰·상단뷰는 공이 날아가는 모양, 주심 시점은 날아와 점점 커지는 모양입니다. 회색 사각형 = 스트라이크존. "
+           "값이 바뀌면 자동으로 다시 날아가고, 재생 버튼(마우스·터치용)으로 다시 볼 수 있습니다.")
     if clickable:
-        tip += (" 주심 시점을 클릭하면 공이 그 위치에 도달하도록 좌우(ax)·수직(az) 무브먼트 슬라이더가 역산되어 바뀝니다. "
-                "구종이 무엇이 되는지는 신경 쓰지 않고 그 위치에 맞는 움직임 값을 그대로 반영해서, 클릭 한 번에 예측 구종이 "
-                "크게 바뀔 수 있습니다. 구속·회전수·익스텐션은 그대로 유지됩니다.")
+        tip += (" 주심 시점을 클릭하면 공이 그 위치에 닿도록 ax·az 슬라이더가 바뀝니다(구속·회전수·익스텐션은 유지). "
+                "그래서 클릭 한 번에 예측 구종이 크게 바뀔 수 있습니다.")
     st.markdown('<div class="pw-label">투구 궤적' + (' (주심 시점을 클릭해 위치 지정)' if clickable else '') + ' '
                 + help_icon(tip) + '</div>', unsafe_allow_html=True)
     speed = st.radio("재생 속도", ["슬로모션", "실제 속도"], horizontal=True, key="traj_speed",
